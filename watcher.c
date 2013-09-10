@@ -16,6 +16,13 @@
 
 #include "watcher.h"
 
+/*
+  function, which initializes the daemon. It ensures, that there is only
+  one daemon running in the system. It then forks the daemon in the background.
+
+  @self:  pointer to the own data structure
+  @return: returns, if the starting of the daemon was successful.
+ */
 w_status w_init(struct watcher *self)
 {
 	w_status res = FAILURE;
@@ -98,7 +105,15 @@ w_status w_init(struct watcher *self)
 	res = SUCCESS;
 	return res;
 }
+/*
+  function, which implements the main loop of the daemon.
+  It initializes fanotify and the internal hashmap, which saves the names of
+  the changed files. It then registers the events in the filesystem, which
+  change files. These are stored in the hashmap.
 
+  @self: pointer to the own data structure
+  @return: returns, if there occured an error
+ */
 w_status w_start(struct watcher *self)
 {
         struct pollfd pollfd[2] = {};
@@ -209,6 +224,11 @@ w_status w_start(struct watcher *self)
 	return r;
 }
 
+/*
+  Helper function, that will extract the filename out of the
+  given file descriptor. Function taken from systemd.
+ */
+
 int readlink_malloc(const char *p, char **r) 
 {
         size_t l = 100;
@@ -236,12 +256,35 @@ int readlink_malloc(const char *p, char **r)
                 l *= 2;
         }
 }
+/*
+  function called, when daemon is shut down. This function will write the
+  current hashmap to the disc and cleans up all the used variables.
+
+  @self: pointer to the own data structure
+  @return: returns, if the shutdown is correctly executed.
+ */
 
 w_status w_shutdown(struct watcher *self)
 {
+	/* TODO: Write the current hash map to the disc
+	   Note: save, if the daemon is shut down successfully
+	 */
+
 	free(self->conf->wd);
 	free(self->conf);
 }
+
+/*
+  parses the config file and changes the value of the config variable.
+
+  Note: Only valid config files can be parsed. If unsure, what keys can be
+  set, you should look at the default config file.
+
+  @confname: name of the config file. Default: /etc/watcher.c
+  @keyname: name of the config variable.
+  @value: value, which shall be set for the config variable keyname
+  @return: returns a pointer to the parsed xml config file
+ */
 
 xmlDocPtr write_config(char *confname, char *keyname, char *value)
 {
@@ -282,9 +325,11 @@ return(doc);
 
 /*
   parses the config file and sets the config values for the daemon.
+
   Note: Only valid config files can be parsed. If unsure, what keys can be
   set, you should look at the default config file.
-  @confname: name of the config file. default: /etc/watcher.conf
+
+  @confname: name of the config file. Default: /etc/watcher.conf
   @conf: pointer to the config structure used by the daemon
   @return: returns a pointer to the parsed xml config file
  */
