@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <libxml/xmlmemory.h>
 #include <libxml/parser.h>
+#include <sys/poll.h>
 
 #include "watcher.h"
 
@@ -75,8 +76,6 @@ w_status w_init(struct watcher *self)
 		exit(EXIT_FAILURE);
 	}
 
-	/* TODO: register signal handler */
-
 	/* double-fork pattern to prevent zombie children */
 	if((pid = fork()) < 0) {
 		exit(EXIT_FAILURE);
@@ -99,21 +98,138 @@ w_status w_init(struct watcher *self)
 
 w_status w_start(struct watcher *self)
 {
-	/* TODO: set signals to right value*/
-	sigset_t mask, oldmask;
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGUSR1);
-	sigprocmask(SIG_BLOCK, &mask, &oldmask);
+        struct pollfd pollfd[_FD_MAX] = {};
+        Hashmap *files = NULL;
+	char *p;
 
-	while(true) {
-		sigsuspend(&oldmask);
+
+        files = hashmap_new(string_hash_func, string_compare_func);
+        if (!files) {
+                syslog(LOG_ERR, "Failed to allocate set: %m");
+                goto finish;
+        }
+
+        fanotify_fd = fanotify_init(FAN_CLOEXEC|FAN_NONBLOCK, O_RDONLY|O_LARGEFILE|O_CLOEXEC|O_NOATIME);
+        if (fanotify_fd < 0) {
+                syslog(LOG_ERR, "Failed to create fanotify object: %m");
+                goto finish;
+        }
+
+	pollfd[0].fd = fanotify_fd;
+	pollfd[0].events = POLLIN;
+
+        if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, "/") < 0) {
+                syslog(LOG_ERR, "Failed to mark /: %m");
+                goto finish;
+        }
+
+	while(1) {
+                union {
+                        struct fanotify_event_metadata metadata;
+                        char buffer[4096];
+                } data;
+                struct fanotify_event_metadata *m;
+                ssize_t n;
+
+		if ((h = poll(pollfd, _FD_MAX, -1))) {
+			if (errno == EINTR)
+				continue;
+
+			syslog(LOG_ERR, "poll(): %m");
+			goto finish;
+		}
+                if ((n = read(fanotify_fd, &data, sizeof(data))) < 0) {
+
+                        if (errno == EINTR || errno == EAGAIN)
+                                continue;
+
+                        if (errno == EACCES)
+                                continue;
+
+                        syslog(LOG_ERR, "Failed to read event: %m");
+                        goto finish;
+                }
+                for (m = &data.metadata; FAN_EVENT_OK(m, n); m = FAN_EVENT_NEXT(m, n)) {
+                        char fn[PATH_MAX];
+
+                        if (m->fd < 0)
+                                goto next_iteration;
+
+                        if (m->pid == getpid())
+                                goto next_iteration;
+
+                        snprintf(fn, sizeof(fn), "/proc/self/fd/%i", m->fd);
+			fn[sizeof(fn) - 1] = 0;
+
+                        if ((k = readlink_malloc(fn, &p)) >= 0) {
+                                if (endswith(p, " (deleted)") ||
+                                    hashmap_get(files, p))
+                                        free(p);
+                                else {
+                                        struct item *entry;
+
+                                        entry = (struct item *) calloc(1,sizeof(struct item));
+                                        if (!entry) {
+						syslog(LOG_ERR,
+						       "could not create map item: Out of Memory");
+                                                r = FAILURE;
+                                                goto finish;
+                                        }
+
+                                        entry->path = strdup(p);
+                                        if (!entry->path) {
+                                                free(entry);
+						syslog(LOG_ERR,
+						       "could not copy path: Out of Memory");
+
+                                                r = FAILURE;
+                                                goto finish;
+                                        }
+
+                                        k = hashmap_put(files, p, entry);
+                                        if (k < 0) {
+                                                syslog(LOG_WARNING"hashmap_put() failed: %s", strerror(-k));
+                                                free(p);
+                                        }
+				}
+			}
+		}
+
 	}
 
-	sigprocmask(SIG_UNBLOCK, &mask, NULL);
+ finish:
+
+}
+int readlink_malloc(const char *p, char **r) {
+        size_t l = 100;
+
+        for (;;) {
+                char *c;
+                ssize_t n;
+
+                if (!(c = (char *) malloc(sizeof(char) * l))))
+                        return -ENOMEM;
+
+                if ((n = readlink(p, c, l-1)) < 0) {
+                        int ret = -errno;
+                        free(c);
+                        return ret;
+                }
+
+                if ((size_t) n < l-1) {
+                        c[n] = 0;
+                        *r = c;
+                        return 0;
+                }
+
+                free(c);
+                l *= 2;
+        }
 }
 
 w_status w_shutdown(struct watcher *self)
 {
+	free(self->conf->wd);
 	free(self->conf);
 }
 
@@ -151,9 +267,17 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value)
 
 		cur = cur->next;
 	}
-	return(doc);
+return(doc);
 }
 
+/*
+  parses the config file and sets the config values for the daemon.
+  Note: Only valid config files can be parsed. If unsure, what keys can be
+  set, you should look at the default config file.
+  @confname: name of the config file. default: /etc/watcher.conf
+  @conf: pointer to the config structure used by the daemon
+  @return: returns a pointer to the parsed xml config file
+ */
 xmlDocPtr read_config(char *confname, w_conf *conf)
 {
 	xmlDocPtr doc;

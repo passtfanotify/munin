@@ -11,6 +11,10 @@ struct w_config {
 	char *wd;
 };
 
+struct item {
+        const char *path;
+};
+
 struct watcher {
 	/* sets parameters at start and forks the program */
 	w_status (*init)(struct watcher *self);
