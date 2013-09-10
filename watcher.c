@@ -1,18 +1,20 @@
 #include <linux/fcntl.h>
-#include <linux/fanotify.h>
+#include <sys/fanotify.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <libxml/xmlmemory.h>
 #include <libxml/parser.h>
-#include <sys/poll.h>
+#include <poll.h>
+#include <errno.h>
+#include <pwd.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <syslog.h>
+#include <limits.h>
 
 #include "watcher.h"
-
-int main(int argc, char **argv)
-{
-	
-}
 
 w_status w_init(struct watcher *self)
 {
@@ -25,7 +27,8 @@ w_status w_init(struct watcher *self)
 	char buf[MAX_CMD];
 	char *cmd_buf;
 	xmlDocPtr doc;
-
+	pid_t pid;
+	pid_t sid;
 
 	errno  = 0;
 	conf = malloc(sizeof(struct w_config));
@@ -98,10 +101,14 @@ w_status w_init(struct watcher *self)
 
 w_status w_start(struct watcher *self)
 {
-        struct pollfd pollfd[_FD_MAX] = {};
+        struct pollfd pollfd[2] = {};
         Hashmap *files = NULL;
 	char *p;
-
+	int fanotify_fd;
+	int h;
+	int k;
+	ssize_t n;
+	w_status r;
 
         files = hashmap_new(string_hash_func, string_compare_func);
         if (!files) {
@@ -131,7 +138,7 @@ w_status w_start(struct watcher *self)
                 struct fanotify_event_metadata *m;
                 ssize_t n;
 
-		if ((h = poll(pollfd, _FD_MAX, -1))) {
+		if ((h = poll(pollfd, 2, -1))) {
 			if (errno == EINTR)
 				continue;
 
@@ -153,10 +160,10 @@ w_status w_start(struct watcher *self)
                         char fn[PATH_MAX];
 
                         if (m->fd < 0)
-                                goto next_iteration;
+				continue;
 
                         if (m->pid == getpid())
-                                goto next_iteration;
+				continue;
 
                         snprintf(fn, sizeof(fn), "/proc/self/fd/%i", m->fd);
 			fn[sizeof(fn) - 1] = 0;
@@ -176,7 +183,7 @@ w_status w_start(struct watcher *self)
                                                 goto finish;
                                         }
 
-                                        entry->path = strdup(p);
+                                        entry->path = malloc(strlen(p) + 1);
                                         if (!entry->path) {
                                                 free(entry);
 						syslog(LOG_ERR,
@@ -185,10 +192,11 @@ w_status w_start(struct watcher *self)
                                                 r = FAILURE;
                                                 goto finish;
                                         }
+					strncpy(entry->path, p, strlen(p) + 1);
 
                                         k = hashmap_put(files, p, entry);
                                         if (k < 0) {
-                                                syslog(LOG_WARNING"hashmap_put() failed: %s", strerror(-k));
+                                                syslog(LOG_WARNING, "hashmap_put() failed: %s", strerror(-k));
                                                 free(p);
                                         }
 				}
@@ -198,16 +206,18 @@ w_status w_start(struct watcher *self)
 	}
 
  finish:
-
+	return r;
 }
-int readlink_malloc(const char *p, char **r) {
+
+int readlink_malloc(const char *p, char **r) 
+{
         size_t l = 100;
 
         for (;;) {
                 char *c;
                 ssize_t n;
 
-                if (!(c = (char *) malloc(sizeof(char) * l))))
+                if (!(c = (char *) malloc(sizeof(char) * l)))
                         return -ENOMEM;
 
                 if ((n = readlink(p, c, l-1)) < 0) {
@@ -278,7 +288,7 @@ return(doc);
   @conf: pointer to the config structure used by the daemon
   @return: returns a pointer to the parsed xml config file
  */
-xmlDocPtr read_config(char *confname, w_conf *conf)
+xmlDocPtr read_config(char *confname, struct w_config *conf)
 {
 	xmlDocPtr doc;
 	xmlNodePtr cur;
@@ -316,4 +326,9 @@ xmlDocPtr read_config(char *confname, w_conf *conf)
 		cur = cur->next;
 	}
 	return(doc);
+}
+
+int main(int argc, char **argv)
+{
+
 }

@@ -1,4 +1,5 @@
 #define MAX_CMD 18
+#define DEFAULT_BUFFER_SIZE 1000
 
 struct watcher get_instance(void);
 
@@ -12,7 +13,7 @@ struct w_config {
 };
 
 struct item {
-        const char *path;
+        char *path;
 };
 
 struct watcher {
@@ -27,5 +28,9 @@ struct watcher {
 	/* clean up and remove daemon */
 	w_status (*shutdown)(struct watcher *self);
 
-	struct w_conf *conf;
+	struct w_config *conf;
 };
+
+int readlink_malloc(const char *p, char **r);
+xmlDocPtr write_config(char *confname, char *keyname, char *value);
+xmlDocPtr read_config(char *confname, struct w_config *conf);
