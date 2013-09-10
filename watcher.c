@@ -1,4 +1,10 @@
+#include <linux/fcntl.h>
 #include <linux/fanotify.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <libxml/xmlmemory.h>
+#include <libxml/parser.h>
 
 #include "watcher.h"
 
@@ -10,40 +16,31 @@ int main(int argc, char **argv)
 w_status w_init(struct watcher *self)
 {
 	w_status res = FAILURE;
-	FILE *config;
+	char *confname = "/etc/watcher.conf";
 	struct passwd pwd;
 	struct passwd *result;
 	struct w_config *conf;
 	int retval = 0;
 	char buf[MAX_CMD];
 	char *cmd_buf;
+	xmlDocPtr doc;
 
 
 	errno  = 0;
 	conf = malloc(sizeof(struct w_config));
 	if (!conf) {
-		fprintf(stderr, "No memory left. Program will shut down now.");
+		fprintf(stderr, "No memory left. Program will shut down now.\n");
 		exit(EXIT_FAILURE);
 	}
 
-	config = fopen("/etc/watcher.conf", "r");
-	if (!config) {
-		perror("Please contact your local system administrator");
+	doc = read_config(confname, conf);
+	if (!doc) {
+		fprintf(stderr, "Please contact your local system administrator\n");
 		exit(EXIT_FAILURE);
 	} else {
-		/* TODO: read saved values */
-		/* TODO: implement libxml*/
-		if (!strcmp(buf, "working_directory")) {
-			cmd_buf = malloc(PATH_MAX+1);
-			if(!fgets(cmd_buf, PATH_MAX, config)) {
-				fprintf(stderr,
-					"working directory initialisation failed, going back to default");
-				conf->wd = "/var/lib/watcher";
-			}
-		}
+		xmlSaveFormatFile (confname, doc, 0);
+		xmlFreeDoc(doc);
 	}
-
-	fclose(config);
 
 	size_t bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
 	if (!bufsize) {
@@ -59,7 +56,7 @@ w_status w_init(struct watcher *self)
 		}
 		free(buff);
 	} else {
-		fprintf(stderr, "No memory left. Program will shut down now.");
+		fprintf(stderr, "No memory left. Program will shut down now.\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -74,7 +71,7 @@ w_status w_init(struct watcher *self)
 	sid = setsid();
 
 	if(sid < 0) {
-		fprintf(stderr, "failed to change sid");
+		fprintf(stderr, "failed to change sid\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -113,4 +110,86 @@ w_status w_start(struct watcher *self)
 	}
 
 	sigprocmask(SIG_UNBLOCK, &mask, NULL);
+}
+
+w_status w_shutdown(struct watcher *self)
+{
+	free(self->conf);
+}
+
+xmlDocPtr write_config(char *confname, char *keyname, char *value)
+{
+	xmlDocPtr doc;
+	xmlNodePtr cur;
+
+	doc = xmlParseFile(confname);
+
+	if (doc == NULL ) {
+		fprintf(stderr,"Document not parsed successfully. \n");
+		return (NULL);
+	}
+
+	cur = xmlDocGetRootElement(doc);
+
+	if (cur == NULL) {
+		fprintf(stderr,"empty document\n");
+		xmlFreeDoc(doc);
+		return (NULL);
+	}
+
+	if (xmlStrcmp(cur->name, (const xmlChar *) "config")) {
+		fprintf(stderr,"document of the wrong type, root node != config");
+		xmlFreeDoc(doc);
+		return (NULL);
+	}
+
+	cur = cur->xmlChildrenNode;
+	while (cur != NULL) {
+		if ((!xmlStrcmp(cur->name, (const xmlChar *) keyname))){
+			xmlNodeSetContent(cur->xmlChildrenNode, value);
+		}
+
+		cur = cur->next;
+	}
+	return(doc);
+}
+
+xmlDocPtr read_config(char *confname, w_conf *conf)
+{
+	xmlDocPtr doc;
+	xmlNodePtr cur;
+	xmlChar *tmp;
+
+	doc = xmlParseFile(confname);
+
+	if (doc == NULL ) {
+		fprintf(stderr,"Document not parsed successfully. \n");
+		return (NULL);
+	}
+
+	cur = xmlDocGetRootElement(doc);
+
+	if (cur == NULL) {
+		fprintf(stderr,"empty document\n");
+		xmlFreeDoc(doc);
+		return (NULL);
+	}
+
+	if (xmlStrcmp(cur->name, (const xmlChar *) "config")) {
+		fprintf(stderr,"document of the wrong type, root node != config");
+		xmlFreeDoc(doc);
+		return (NULL);
+	}
+
+	cur = cur->xmlChildrenNode;
+	while (cur != NULL) {
+		if ((!xmlStrcmp(cur->name, (const xmlChar *) "working_directory"))){
+			tmp = xmlNodeGetContent(cur->xmlChildrenNode);
+			strcpy(conf->wd, (const char *) tmp);
+			xmlFree(tmp);
+		}
+
+		cur = cur->next;
+	}
+	return(doc);
 }

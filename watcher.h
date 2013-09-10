@@ -21,7 +21,7 @@ struct watcher {
 	w_status (*change_params)(struct watcher *self, char **argv);
 
 	/* clean up and remove daemon */
-	w_status (*shutdown)(void);
+	w_status (*shutdown)(struct watcher *self);
 
 	struct w_conf *conf;
 };
