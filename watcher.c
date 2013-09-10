@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <syslog.h>
 #include <limits.h>
+#include <glib.h>
 
 #include "watcher.h"
 
@@ -117,7 +118,7 @@ w_status w_init(struct watcher *self)
 w_status w_start(struct watcher *self)
 {
         struct pollfd pollfd[2] = {};
-        Hashmap *files = NULL;
+        GHashTable *files = NULL;
 	char *p;
 	int fanotify_fd;
 	int h;
@@ -125,7 +126,7 @@ w_status w_start(struct watcher *self)
 	ssize_t n;
 	w_status r;
 
-        files = hashmap_new(string_hash_func, string_compare_func);
+        files = g_hash_table_new(g_str_hash, g_str_equal);
         if (!files) {
                 syslog(LOG_ERR, "Failed to allocate set: %m");
                 goto finish;
@@ -184,8 +185,7 @@ w_status w_start(struct watcher *self)
 			fn[sizeof(fn) - 1] = 0;
 
                         if ((k = readlink_malloc(fn, &p)) >= 0) {
-                                if (endswith(p, " (deleted)") ||
-                                    hashmap_get(files, p))
+                                if (g_hash_table_lookup(files, p))
                                         free(p);
                                 else {
                                         struct item *entry;
@@ -209,11 +209,7 @@ w_status w_start(struct watcher *self)
                                         }
 					strncpy(entry->path, p, strlen(p) + 1);
 
-                                        k = hashmap_put(files, p, entry);
-                                        if (k < 0) {
-                                                syslog(LOG_WARNING, "hashmap_put() failed: %s", strerror(-k));
-                                                free(p);
-                                        }
+                                        g_hash_table_insert(files, p, entry);
 				}
 			}
 		}
@@ -229,7 +225,7 @@ w_status w_start(struct watcher *self)
   given file descriptor. Function taken from systemd.
  */
 
-int readlink_malloc(const char *p, char **r) 
+int readlink_malloc(const char *p, char **r)
 {
         size_t l = 100;
 
