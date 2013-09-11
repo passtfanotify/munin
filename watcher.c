@@ -17,6 +17,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <sys/signalfd.h>
+#include <time.h>
 
 #include "watcher.h"
 
@@ -555,11 +556,11 @@ int main(int argc, char **argv)
 	struct watcher *self;
 	w_status res;
 	FILE *sfile;
-	time_t time;
+	time_t stime;
 	char *tmp;
 	size_t readsize;
 
-	sfile = fopen("/etc/watcher.start", r);
+	sfile = fopen("/etc/watcher.start", "r");
 	if (!sfile) {
                 perror("fopen");
                 exit(EXIT_FAILURE);
@@ -625,16 +626,17 @@ int main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 
-		sfile = fopen("/etc/watcher.start", w);
+		sfile = fopen("/etc/watcher.start", "w");
 		if (!sfile) {
 			perror("fopen");
 			exit(EXIT_FAILURE);
 		}
 
-		time = time(NULL);
-		fprintf(sfile, "%s", time);
+		stime = time(NULL);
+		fprintf(sfile, "%s", ctime(&stime));
 		fclose(sfile);
 		exit(EXIT_SUCCESS);
+	}
 }
 
 void *change_conf(void *arg)
