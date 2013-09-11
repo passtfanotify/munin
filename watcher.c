@@ -236,7 +236,7 @@ w_status w_start(struct watcher *self)
 				self->files = self->old_files;
 				self->old_files = tmp;
 
-				pthread_create(&self->thread_output, NULL, output, /* TODO: changearg */ NULL);
+				pthread_create(&self->thread_output, NULL, output, self->old_files);
 				pthread_detach(self->thread_output);
 				continue;
 			} else {
@@ -537,7 +537,27 @@ void *change_conf(void *arg)
 
 }
 
-void *output(void *arg)
+void *output(void *hash_map)
 {
+	FILE *savefile = fopen("save", "a+");
 
+	GHashTableIter iter;
+	gpointer key, value;
+
+	if (!savefile) {
+		exit(EXIT_FAILURE);
+	}
+
+	g_hash_table_iter_init (&iter, (GHashTable *) hash_map);
+	while (g_hash_table_iter_next (&iter, &key, &value)){
+		fprintf(savefile, "%s\n", (((struct item *)value)->path));
+		free(key);
+		free(((struct item *)value)->path);
+		free(value);
+		g_hash_table_iter_remove (&iter);
+	}
+
+	fclose(savefile);
+
+	exit(EXIT_SUCCESS);
 }
