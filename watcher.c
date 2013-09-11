@@ -126,8 +126,8 @@ w_status w_init(struct watcher *self)
 		if (!entry) {
 			syslog(LOG_ERR,
 			       "could not create map item: Out of Memory");
-			res = FAILURE;
 			free(p);
+			return res;
 		}
 
 		p = malloc((strlen(input) + 1 )* sizeof(char));
@@ -135,7 +135,7 @@ w_status w_init(struct watcher *self)
 			syslog(LOG_ERR,
 			       "could not copy path: Out of Memory");
 
-			res = FAILURE;
+			return res;
 		}
 
 		strncpy(p, input, strlen(input) + 1);
@@ -147,13 +147,16 @@ w_status w_init(struct watcher *self)
 			syslog(LOG_ERR,
 			       "could not copy path: Out of Memory");
 
-			res = FAILURE;
+			return res;
 		}
 		strncpy(entry->path, p, strlen(p) + 1);
 
 		g_hash_table_insert(self->files, p, entry);
 
 	}
+
+	if (ferror(save))
+		return res;
 
 	res = SUCCESS;
 	return res;
@@ -196,16 +199,15 @@ w_status w_start(struct watcher *self)
 	int k;
 	int i;
 	ssize_t n;
-	w_status r;
+	w_status res = FAILURE;
         sigset_t mask;
 	GHashTable *tmp;
 
         fanotify_fd = fanotify_init(FAN_CLOEXEC|FAN_NONBLOCK, O_RDONLY|O_LARGEFILE|O_CLOEXEC|O_NOATIME);
         if (fanotify_fd < 0) {
                 syslog(LOG_ERR, "Failed to create fanotify object: %m");
-		r = FAILURE;
-                goto finish;
-        }
+        	return res;
+	}
 	sigemptyset(&mask);
         sigaddset(&mask, SIGINT);
         sigaddset(&mask, SIGTERM);
@@ -214,8 +216,7 @@ w_status w_start(struct watcher *self)
 
         if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC)) < 0) {
                 syslog(LOG_ERR,"Failed to get signal fd: %m");
-		r = FAILURE;
-                goto finish;
+        	return res;
         }
 
 
@@ -228,8 +229,7 @@ w_status w_start(struct watcher *self)
 	for(i=0; i< self->conf->monitor_count; i++){
 		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, (self->conf->monitor_paths[i])) < 0) {
 			syslog(LOG_ERR, "Failed to mark %s: %m", self->conf->monitor_paths[i]);
-			r = FAILURE;
-			goto finish;
+        		return res;
 		}
 	}
 
@@ -249,8 +249,7 @@ w_status w_start(struct watcher *self)
 				continue;
 
 			syslog(LOG_ERR, "poll failed: %m");
-			r = FAILURE;
-			goto finish;
+        		return res;
 		}
 
                 if (pollfd[1].revents) {
@@ -263,8 +262,7 @@ w_status w_start(struct watcher *self)
 					continue;
 
 				syslog(LOG_ERR, "Failed to read event: %m");
-				r = FAILURE;
-				goto finish;
+        			return res;
 			}
 			if (!self->completed_out && sigs.ssi_signo == SIGQUIT) {
 				continue;
@@ -289,8 +287,8 @@ w_status w_start(struct watcher *self)
 				pthread_detach(self->thread_output);
 				continue;
 			} else {
-				r = SUCCESS;
-				break;
+				res = SUCCESS;
+				return res;
 			}
                 }
 
@@ -303,8 +301,7 @@ w_status w_start(struct watcher *self)
                                 continue;
 
                         syslog(LOG_ERR, "Failed to read event: %m");
-			r = FAILURE;
-                        goto finish;
+        		return res;
                 }
 
                 for (m = &data.metadata; FAN_EVENT_OK(m, n); m = FAN_EVENT_NEXT(m, n)) {
@@ -329,9 +326,8 @@ w_status w_start(struct watcher *self)
                                         if (!entry) {
 						syslog(LOG_ERR,
 						       "could not create map item: Out of Memory");
-                                                r = FAILURE;
 						free(p);
-                                                goto finish;
+        					return res;
                                         }
 
                                         entry->path = malloc(strlen(p) + 1);
@@ -341,8 +337,7 @@ w_status w_start(struct watcher *self)
 						syslog(LOG_ERR,
 						       "could not copy path: Out of Memory");
 
-                                                r = FAILURE;
-                                                goto finish;
+        					return res;
                                         }
 					strncpy(entry->path, p, strlen(p) + 1);
 
@@ -352,9 +347,6 @@ w_status w_start(struct watcher *self)
 		}
 
 	}
-
- finish:
-	return r;
 }
 
 /*
