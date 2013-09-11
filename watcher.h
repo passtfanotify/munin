@@ -10,6 +10,8 @@ typedef enum {
 
 struct w_config {
 	char *wd;
+	char **monitor_paths;
+	int monitor_count;
 };
 
 struct item {

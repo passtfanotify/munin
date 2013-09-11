@@ -117,12 +117,12 @@ int endswith(char path[], const char *needle)
 {
 	char *pos;
 	size_t len;
-	
+
 	pos = strstr(path, needle);
 	len = strlen(path);
 
 	if (pos) {
-		if (pos == &path[len - 11]) {
+		if (pos == &path[len - 10]) {
 			return 1;
 		}
 	}
@@ -148,6 +148,7 @@ w_status w_start(struct watcher *self)
 	int signal_fd;
 	int h;
 	int k;
+	int i;
 	ssize_t n;
 	w_status r;
         sigset_t mask;
@@ -177,11 +178,13 @@ w_status w_start(struct watcher *self)
 	pollfd[1].fd = signal_fd;
 	pollfd[1].events = POLLIN;
 
-        if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, "/") < 0) {
-                syslog(LOG_ERR, "Failed to mark /: %m");
-		r = FAILURE;
-                goto finish;
-        }
+	for(i=0; i< self->conf->monitor_count; i++){
+		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, (self->conf->monitor_paths[i])) < 0) {
+			syslog(LOG_ERR, "Failed to mark /: %m");
+			r = FAILURE;
+			goto finish;
+		}
+	}
 
 	while(1) {
                 union {
@@ -268,7 +271,7 @@ w_status w_start(struct watcher *self)
 			fn[sizeof(fn) - 1] = 0;
 
                         if ((k = readlink_malloc(fn, &p)) >= 0) {
-                                if (endswith(p, " (deleted)") < 0 || g_hash_table_lookup(files, p))
+                                if (endswith(p, " (deleted)") < 0 || g_hash_table_lookup(self->files, p))
                                         free(p);
                                 else {
                                         struct item *entry;
@@ -350,8 +353,12 @@ w_status w_shutdown(struct watcher *self)
 	/* TODO: Write the current hash map to the disc
 	   Note: save, if the daemon is shut down successfully
 	 */
-
+	int k = 0;
 	free(self->conf->wd);
+	for(k=0; k < self->conf->monitor_count; k++){
+		free(self->conf->monitor_paths[k]);
+	}
+	free(self->conf->monitor_paths);
 	free(self->conf);
 }
 
@@ -418,6 +425,7 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 {
 	xmlDocPtr doc;
 	xmlNodePtr cur;
+	xmlNodePtr cur_path;
 	xmlChar *tmp;
 
 	doc = xmlParseFile(confname);
@@ -453,6 +461,22 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 
 			strcpy(conf->wd, (const char *) tmp);
 			xmlFree(tmp);
+		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths"))) {
+			cur_path = cur->xmlChildrenNode;
+			conf->monitor_paths = malloc(xmlChildElementCount(cur) * sizeof(char *));
+			int k;
+			while(cur_path != NULL) {
+				tmp = xmlNodeGetContent(cur_path);
+				conf->monitor_paths[k] = malloc(strlen((const char *) tmp) + 1);
+				if (!conf->monitor_paths[k]) {
+					fprintf(stderr, "Out of memory, program shutting down.\n");
+					return NULL;
+				}
+
+				xmlFree(tmp);
+				k++;
+				cur_path = cur_path->next;
+			}
 		}
 
 		cur = cur->next;
