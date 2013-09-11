@@ -43,6 +43,9 @@ w_status w_init(struct watcher *self)
 	size_t bufsize;
 	char *buff;
 	int s;
+	FILE *save;
+	char input[PATH_MAX + 1];
+	char *p;
 
 	errno  = 0;
 	conf = malloc(sizeof(struct w_config));
@@ -112,6 +115,44 @@ w_status w_init(struct watcher *self)
 	self->conf = conf;
 
 	openlog("watcher", LOG_CONS | LOG_PID | LOG_PERROR, LOG_USER);
+
+	save = fopen("save", "r");
+
+	while(fgets(input, PATH_MAX, save)){
+		struct item *entry;
+
+		entry = (struct item *) calloc(1, sizeof(struct item));
+		if (!entry) {
+			syslog(LOG_ERR,
+			       "could not create map item: Out of Memory");
+			res = FAILURE;
+			free(p);
+		}
+
+		p = malloc((strlen(input) + 1 )* sizeof(char));
+		if (!p) {
+			syslog(LOG_ERR,
+			       "could not copy path: Out of Memory");
+
+			res = FAILURE;
+		}
+
+		strncpy(p, input, strlen(input) + 1);
+
+		entry->path = malloc(strlen(p) + 1);
+		if (!entry->path) {
+			free(entry);
+			free(p);
+			syslog(LOG_ERR,
+			       "could not copy path: Out of Memory");
+
+			res = FAILURE;
+		}
+		strncpy(entry->path, p, strlen(p) + 1);
+
+		g_hash_table_insert(self->files, p, entry);
+
+	}
 
 	res = SUCCESS;
 	return res;
