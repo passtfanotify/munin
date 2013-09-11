@@ -54,6 +54,7 @@ w_status w_init(struct watcher *self)
 	doc = read_config(confname, conf);
 	if (!doc) {
 		fprintf(stderr, "Please contact your local system administrator\n");
+		free(conf);
 		return res;
 	} else {
 		xmlSaveFormatFile (confname, doc, 0);
@@ -75,6 +76,7 @@ w_status w_init(struct watcher *self)
 		free(buff);
 	} else {
 		fprintf(stderr, "No memory left. Program will shut down now.\n");
+		free(conf);
 		return res;
 	}
 
@@ -90,6 +92,7 @@ w_status w_init(struct watcher *self)
 
 	if(sid < 0) {
 		fprintf(stderr, "failed to change sid\n");
+		free(conf);
 		return res;
 	}
 
@@ -103,6 +106,7 @@ w_status w_init(struct watcher *self)
 
 	if (-1 == chdir(conf->wd)) {
 		perror("could not change into working directory");
+		free(conf);
 		return res;
 	}
 	self->conf = conf;
@@ -164,6 +168,7 @@ w_status w_start(struct watcher *self)
         sigaddset(&mask, SIGINT);
         sigaddset(&mask, SIGTERM);
         sigaddset(&mask, SIGQUIT);
+        sigaddset(&mask, SIGKILL);
 
         if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC)) < 0) {
                 syslog(LOG_ERR,"Failed to get signal fd: %m");
@@ -180,20 +185,22 @@ w_status w_start(struct watcher *self)
 
 	for(i=0; i< self->conf->monitor_count; i++){
 		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, (self->conf->monitor_paths[i])) < 0) {
-			syslog(LOG_ERR, "Failed to mark /: %m");
+			syslog(LOG_ERR, "Failed to mark %s: %m", self->conf->monitor_paths[i]);
 			r = FAILURE;
 			goto finish;
 		}
 	}
 
 	while(1) {
-                union {
+		union {
                         struct fanotify_event_metadata metadata;
                         char buffer[4096];
                 } data;
                 struct fanotify_event_metadata *m;
                 ssize_t n;
 		struct signalfd_siginfo sigs;
+
+		errno = 0;
 
 		if ((h = poll(pollfd, 2, -1))) {
 			if (errno == EINTR)
@@ -271,9 +278,9 @@ w_status w_start(struct watcher *self)
 			fn[sizeof(fn) - 1] = 0;
 
                         if ((k = readlink_malloc(fn, &p)) >= 0) {
-                                if (endswith(p, " (deleted)") < 0 || g_hash_table_lookup(self->files, p))
+                                if (endswith(p, " (deleted)") < 0 || g_hash_table_lookup(self->files, p)) {
                                         free(p);
-                                else {
+                                } else {
                                         struct item *entry;
 
 					/* TODO: FREE */
@@ -486,31 +493,57 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 
 int main(int argc, char **argv)
 {
-	/* There should be some code */
 	struct watcher *self;
 	w_status res;
 
 	self = malloc(sizeof(struct watcher));
 
+	if(!self) {
+		fprintf(stderr, "Out of memory. Aborting.\n");
+		exit(EXIT_FAILURE);
+	}
+
         self->files = g_hash_table_new(g_str_hash, g_str_equal);
         if (!self->files) {
                 fprintf(stderr,"Failed to allocate set: %m\n");
+		free(self);
 		exit(EXIT_FAILURE);
         }
 
         self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
         if (!self->old_files) {
                 fprintf(stderr, "Failed to allocate set: %m\n");
+		g_hash_table_destroy(self->files);
+		free(self);
 		exit(EXIT_FAILURE);
         }
 
 	res = w_init(self);
 	if (res == FAILURE) {
 		fprintf(stderr, "Initialization of daemon failed.\n");
+		g_hash_table_destroy(self->files);
+		g_hash_table_destroy(self->old_files);
+                free(self);
 		exit(EXIT_FAILURE);
 	}
 
-	
+	res = w_start(self);
+	if (res == FAILURE) {
+		fprintf(stderr, "A runtime error occured. Please check logs.\n");
+		g_hash_table_destroy(self->files);
+                g_hash_table_destroy(self->old_files);
+                free(self);
+		exit(EXIT_FAILURE);
+	}
+
+	res = w_shutdown(self);
+	if  (res == FAILURE) {
+		/*TODO: tell backup software to use traditional way, because of data loss*/
+		exit(EXIT_FAILURE);
+	}
+
+	/*TODO: Mark sucessful shutdown in a file*/
+	exit(EXIT_SUCCESS);
 }
 
 void *change_conf(void *arg)
