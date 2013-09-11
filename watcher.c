@@ -464,20 +464,29 @@ int main(int argc, char **argv)
 {
 	/* There should be some code */
 	struct watcher *self;
+	w_status res;
 
 	self = malloc(sizeof(struct watcher));
 
         self->files = g_hash_table_new(g_str_hash, g_str_equal);
         if (!self->files) {
-                fprintf(stderr,"Failed to allocate set: %m");
+                fprintf(stderr,"Failed to allocate set: %m\n");
 		exit(EXIT_FAILURE);
         }
 
         self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
         if (!self->old_files) {
-                fprintf(stderr, "Failed to allocate set: %m");
+                fprintf(stderr, "Failed to allocate set: %m\n");
 		exit(EXIT_FAILURE);
         }
+
+	res = w_init(self);
+	if (res == FAILURE) {
+		fprintf(stderr, "Initialization of daemon failed.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	
 }
 
 void *change_conf(void *arg)
