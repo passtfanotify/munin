@@ -14,6 +14,9 @@
 #include <syslog.h>
 #include <limits.h>
 #include <glib.h>
+#include <signal.h>
+#include <pthread.h>
+#include <sys/signalfd.h>
 
 #include "watcher.h"
 
@@ -140,31 +143,43 @@ int endswith(char path[], const char *needle)
 w_status w_start(struct watcher *self)
 {
         struct pollfd pollfd[2] = {};
-        GHashTable *files = NULL;
 	char *p;
 	int fanotify_fd;
+	int signal_fd;
 	int h;
 	int k;
 	ssize_t n;
 	w_status r;
-
-        files = g_hash_table_new(g_str_hash, g_str_equal);
-        if (!files) {
-                syslog(LOG_ERR, "Failed to allocate set: %m");
-                goto finish;
-        }
+        sigset_t mask;
+	GHashTable *tmp;
 
         fanotify_fd = fanotify_init(FAN_CLOEXEC|FAN_NONBLOCK, O_RDONLY|O_LARGEFILE|O_CLOEXEC|O_NOATIME);
         if (fanotify_fd < 0) {
                 syslog(LOG_ERR, "Failed to create fanotify object: %m");
+		r = FAILURE;
+                goto finish;
+        }
+	sigemptyset(&mask);
+        sigaddset(&mask, SIGINT);
+        sigaddset(&mask, SIGTERM);
+        sigaddset(&mask, SIGQUIT);
+
+        if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC)) < 0) {
+                syslog(LOG_ERR,"Failed to get signal fd: %m");
+		r = FAILURE;
                 goto finish;
         }
 
+
+
 	pollfd[0].fd = fanotify_fd;
 	pollfd[0].events = POLLIN;
+	pollfd[1].fd = signal_fd;
+	pollfd[1].events = POLLIN;
 
         if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, "/") < 0) {
                 syslog(LOG_ERR, "Failed to mark /: %m");
+		r = FAILURE;
                 goto finish;
         }
 
@@ -175,14 +190,58 @@ w_status w_start(struct watcher *self)
                 } data;
                 struct fanotify_event_metadata *m;
                 ssize_t n;
+		struct signalfd_siginfo sigs;
 
 		if ((h = poll(pollfd, 2, -1))) {
 			if (errno == EINTR)
 				continue;
 
-			syslog(LOG_ERR, "poll(): %m");
+			syslog(LOG_ERR, "poll failed: %m");
+			r = FAILURE;
 			goto finish;
 		}
+
+                if (pollfd[1].revents) {
+                        syslog(LOG_NOTICE, "Got signal");
+			if(read(signal_fd, &sigs, sizeof(sigs)) < 0) {
+				if (errno == EINTR || errno == EAGAIN)
+					continue;
+
+				if (errno == EACCES)
+					continue;
+
+				syslog(LOG_ERR, "Failed to read event: %m");
+				r = FAILURE;
+				goto finish;
+			}
+			if (!self->completed_out && sigs.ssi_signo == SIGQUIT) {
+				continue;
+			} else if (!self->completed_out &&
+				   (sigs.ssi_signo == SIGKILL || sigs.ssi_signo == SIGTERM)) {
+				/* TODO: SIGKILL and SIGTERM while change of config was made*/
+				/* might be just waitpid */
+			} else if (sigs.ssi_signo == SIGQUIT){
+				tmp = self->files;
+				self->files = self->old_files;
+				self->old_files = tmp;
+
+				pthread_create(&self->thread_change, NULL, change_conf, /* TODO: changearg */NULL);
+				pthread_detach(self->thread_change);
+				continue;
+			} else if (sigs.ssi_signo == SIGINT) {
+				tmp = self->files;
+				self->files = self->old_files;
+				self->old_files = tmp;
+
+				pthread_create(&self->thread_output, NULL, output, /* TODO: changearg */ NULL);
+				pthread_detach(self->thread_output);
+				continue;
+			} else {
+				r = SUCCESS;
+				break;
+			}
+                }
+
                 if ((n = read(fanotify_fd, &data, sizeof(data))) < 0) {
 
                         if (errno == EINTR || errno == EAGAIN)
@@ -192,8 +251,10 @@ w_status w_start(struct watcher *self)
                                 continue;
 
                         syslog(LOG_ERR, "Failed to read event: %m");
+			r = FAILURE;
                         goto finish;
                 }
+
                 for (m = &data.metadata; FAN_EVENT_OK(m, n); m = FAN_EVENT_NEXT(m, n)) {
                         char fn[PATH_MAX];
 
@@ -235,7 +296,7 @@ w_status w_start(struct watcher *self)
                                         }
 					strncpy(entry->path, p, strlen(p) + 1);
 
-                                        g_hash_table_insert(files, p, entry);
+                                        g_hash_table_insert(self->files, p, entry);
 				}
 			}
 		}
@@ -400,6 +461,31 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 }
 
 int main(int argc, char **argv)
+{
+	/* There should be some code */
+	struct watcher *self;
+
+	self = malloc(sizeof(struct watcher));
+
+        self->files = g_hash_table_new(g_str_hash, g_str_equal);
+        if (!self->files) {
+                fprintf(stderr,"Failed to allocate set: %m");
+		exit(EXIT_FAILURE);
+        }
+
+        self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
+        if (!self->old_files) {
+                fprintf(stderr, "Failed to allocate set: %m");
+		exit(EXIT_FAILURE);
+        }
+}
+
+void *change_conf(void *arg)
+{
+
+}
+
+void *output(void *arg)
 {
 
 }

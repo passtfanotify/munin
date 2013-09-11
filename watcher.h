@@ -29,8 +29,15 @@ struct watcher {
 	w_status (*shutdown)(struct watcher *self);
 
 	struct w_config *conf;
+	GHashTable *files;
+	GHashTable *old_files;
+	volatile int completed_out;
+	pthread_t thread_change;
+	pthread_t thread_output;
 };
 
 int readlink_malloc(const char *p, char **r);
+void *change_conf(void *);
+void *output(void *);
 xmlDocPtr write_config(char *confname, char *keyname, char *value);
 xmlDocPtr read_config(char *confname, struct w_config *conf);
