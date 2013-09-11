@@ -37,31 +37,34 @@ w_status w_init(struct watcher *self)
 	xmlDocPtr doc;
 	pid_t pid;
 	pid_t sid;
+	size_t bufsize;
+	char *buff;
+	int s;
 
 	errno  = 0;
 	conf = malloc(sizeof(struct w_config));
 	if (!conf) {
 		fprintf(stderr, "No memory left. Program will shut down now.\n");
-		exit(EXIT_FAILURE);
+		return res;
 	}
 
 	doc = read_config(confname, conf);
 	if (!doc) {
 		fprintf(stderr, "Please contact your local system administrator\n");
-		exit(EXIT_FAILURE);
+		return res;
 	} else {
 		xmlSaveFormatFile (confname, doc, 0);
 		xmlFreeDoc(doc);
 	}
 
-	size_t bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
+	bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
 	if (!bufsize) {
 		bufsize = DEFAULT_BUFFER_SIZE;
 	}
 
-	char *buff = malloc(bufsize);
+	buff = malloc(bufsize);
 	if (buff != NULL) {
-		int s = getpwnam_r("daemon", &pwd, buff, bufsize, &result);
+		s = getpwnam_r("daemon", &pwd, buff, bufsize, &result);
 
 		if (s == 0 && result) {
 			setuid(result->pw_uid);
@@ -69,11 +72,11 @@ w_status w_init(struct watcher *self)
 		free(buff);
 	} else {
 		fprintf(stderr, "No memory left. Program will shut down now.\n");
-		exit(EXIT_FAILURE);
+		return res;
 	}
 
 	if((pid = fork()) < 0) {
-		exit(EXIT_FAILURE);
+		return res;
 	} else if(pid != 0) {
 		exit(EXIT_SUCCESS);
 	}
@@ -84,12 +87,12 @@ w_status w_init(struct watcher *self)
 
 	if(sid < 0) {
 		fprintf(stderr, "failed to change sid\n");
-		exit(EXIT_FAILURE);
+		return res;
 	}
 
 	/* double-fork pattern to prevent zombie children */
 	if((pid = fork()) < 0) {
-		exit(EXIT_FAILURE);
+		return res;
 	} else if(pid != 0) {
 		/* parent */
 		exit(EXIT_SUCCESS);
@@ -97,7 +100,7 @@ w_status w_init(struct watcher *self)
 
 	if (-1 == chdir(conf->wd)) {
 		perror("could not change into working directory");
-		exit(EXIT_FAILURE);
+		return res;
 	}
 	self->conf = conf;
 
@@ -106,6 +109,25 @@ w_status w_init(struct watcher *self)
 	res = SUCCESS;
 	return res;
 }
+
+int endswith(char path[], const char *needle)
+{
+	char *pos;
+	size_t len;
+	
+	pos = strstr(path, needle);
+	len = strlen(path);
+
+	if (pos) {
+		if (pos == &path[len - 11]) {
+			return 1;
+		}
+	}
+
+	return -1;
+}
+
+
 /*
   function, which implements the main loop of the daemon.
   It initializes fanotify and the internal hashmap, which saves the names of
@@ -185,22 +207,26 @@ w_status w_start(struct watcher *self)
 			fn[sizeof(fn) - 1] = 0;
 
                         if ((k = readlink_malloc(fn, &p)) >= 0) {
-                                if (g_hash_table_lookup(files, p))
+                                if (endswith(p, " (deleted)") < 0 || g_hash_table_lookup(files, p))
                                         free(p);
                                 else {
                                         struct item *entry;
 
-                                        entry = (struct item *) calloc(1,sizeof(struct item));
+					/* TODO: FREE */
+                                        entry = (struct item *) calloc(1, sizeof(struct item));
                                         if (!entry) {
 						syslog(LOG_ERR,
 						       "could not create map item: Out of Memory");
                                                 r = FAILURE;
+						free(p);
                                                 goto finish;
                                         }
 
+					/* TODO: FREE */
                                         entry->path = malloc(strlen(p) + 1);
                                         if (!entry->path) {
                                                 free(entry);
+						free(p);
 						syslog(LOG_ERR,
 						       "could not copy path: Out of Memory");
 
@@ -228,18 +254,16 @@ w_status w_start(struct watcher *self)
 int readlink_malloc(const char *p, char **r)
 {
         size_t l = 100;
+	char *c;
+	ssize_t n;
 
         for (;;) {
-                char *c;
-                ssize_t n;
-
                 if (!(c = (char *) malloc(sizeof(char) * l)))
                         return -ENOMEM;
 
                 if ((n = readlink(p, c, l-1)) < 0) {
-                        int ret = -errno;
                         free(c);
-                        return ret;
+                        return -errno;
                 }
 
                 if ((size_t) n < l-1) {
@@ -338,8 +362,8 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 	doc = xmlParseFile(confname);
 
 	if (doc == NULL ) {
-		fprintf(stderr,"Document not parsed successfully. \n");
-		return (NULL);
+		fprintf(stderr,"Document not parsed successfully.\n");
+		return NULL;
 	}
 
 	cur = xmlDocGetRootElement(doc);
@@ -347,19 +371,25 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 	if (cur == NULL) {
 		fprintf(stderr,"empty document\n");
 		xmlFreeDoc(doc);
-		return (NULL);
+		return NULL;
 	}
 
 	if (xmlStrcmp(cur->name, (const xmlChar *) "config")) {
-		fprintf(stderr,"document of the wrong type, root node != config");
+		fprintf(stderr,"document of the wrong type, root node != config\n");
 		xmlFreeDoc(doc);
-		return (NULL);
+		return NULL;
 	}
 
 	cur = cur->xmlChildrenNode;
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) "working_directory"))){
 			tmp = xmlNodeGetContent(cur->xmlChildrenNode);
+			conf->wd = malloc(strlen((const char *) tmp) + 1);
+			if (!conf->wd) {
+				fprintf(stderr, "Out of memory, program shutting down.\n");
+				return NULL;
+			}
+
 			strcpy(conf->wd, (const char *) tmp);
 			xmlFree(tmp);
 		}
