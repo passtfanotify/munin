@@ -433,10 +433,12 @@ w_status w_shutdown(struct watcher *self)
   @return: returns a pointer to the parsed xml config file
  */
 
-xmlDocPtr write_config(char *confname, char *keyname, char *value)
+xmlDocPtr write_config(char *confname, char *keyname, char *value, struct watcher *self)
 {
 	xmlDocPtr doc;
 	xmlNodePtr cur;
+	xmlNodePtr child;
+	char *name;
 
 	doc = xmlParseFile(confname);
 
@@ -462,12 +464,20 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value)
 	cur = cur->xmlChildrenNode;
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) keyname))){
-			xmlNodeSetContent(cur->xmlChildrenNode, value);
+			if(strcmp(keyname, "monitor_paths") == 0) {
+				name = malloc(strlen("value") + 3);
+				sprintf(name, "value%d", xmlChildElementCount(cur)+1);
+				child = xmlNewChild(cur, NULL, name, value);
+				xmlNewProp(child, "changed", "1");
+			} else {
+				xmlNodeSetContent(cur->xmlChildrenNode, value);
+				xmlSetProb(cur->xmlChildrenNode, "changed", "1");
+			}
 		}
 
 		cur = cur->next;
 	}
-return(doc);
+	return(doc);
 }
 
 /*
@@ -631,9 +641,18 @@ int main(int argc, char **argv)
 	}
 }
 
-void *change_conf(void *arg)
+w_status *change_conf(void *arg)
 {
+	struct watcher *self = (struct watcher *)arg;
 
+	if (strcmp(self->changed_key, "monitor_paths") == 0) {
+		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, self->changed_value) < 0) {
+			syslog(LOG_ERR, "Failed to mark %s: %m", self->changed_value);
+			exit(EXIT_FAILURE);
+		}
+	} else if (strcmp(self->changed_key, "working_directory")) {
+		
+	}
 }
 
 void *output(void *hash_map)
