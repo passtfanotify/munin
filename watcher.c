@@ -350,16 +350,36 @@ int readlink_malloc(const char *p, char **r)
 
 w_status w_shutdown(struct watcher *self)
 {
-	/* TODO: Write the current hash map to the disc
-	   Note: save, if the daemon is shut down successfully
-	 */
 	int k = 0;
+	FILE *savefile = fopen("save", "a+");
+
+	GHashTableIter iter;
+	gpointer key, value;
+
+	if (!savefile) {
+		return FAILURE;
+	}
+
+	g_hash_table_iter_init (&iter, self->files);
+	while (g_hash_table_iter_next (&iter, &key, &value)){
+		fprintf(savefile, "%s\n", (((struct item *)value)->path));
+		free(key);
+		free(((struct item *)value)->path);
+		free(value);
+		g_hash_table_iter_remove (&iter);
+	}
+
+	fclose(savefile);
+
+
 	free(self->conf->wd);
 	for(k=0; k < self->conf->monitor_count; k++){
 		free(self->conf->monitor_paths[k]);
 	}
 	free(self->conf->monitor_paths);
 	free(self->conf);
+
+	return SUCCESS;
 }
 
 /*
@@ -510,7 +530,6 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	
 }
 
 void *change_conf(void *arg)
