@@ -271,12 +271,7 @@ w_status w_start(struct watcher *self)
 				/* TODO: SIGKILL and SIGTERM while change of config was made*/
 				/* might be just waitpid */
 			} else if (sigs.ssi_signo == SIGQUIT){
-				tmp = self->files;
-				self->files = self->old_files;
-				self->old_files = tmp;
-
-				pthread_create(&self->thread_change, NULL, change_conf, /* TODO: changearg */NULL);
-				pthread_detach(self->thread_change);
+				change_conf(self, fanotify_fd);
 				continue;
 			} else if (sigs.ssi_signo == SIGINT) {
 				tmp = self->files;
@@ -466,12 +461,13 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, struct watche
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) keyname))){
 			if(strcmp(keyname, "monitor_paths") == 0) {
 				name = malloc(strlen("value") + 3);
-				sprintf(name, "value%d", xmlChildElementCount(cur)+1);
+				sprintf(name, "value%d", (int) xmlChildElementCount(cur)+1);
 				child = xmlNewChild(cur, NULL, name, value);
 				xmlNewProp(child, "changed", "1");
+				xmlSetProp(cur, "changed", "1");
 			} else {
 				xmlNodeSetContent(cur->xmlChildrenNode, value);
-				xmlSetProb(cur->xmlChildrenNode, "changed", "1");
+				xmlSetProp(cur, "changed", "1");
 			}
 		}
 
@@ -532,7 +528,8 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 			xmlFree(tmp);
 		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths"))) {
 			cur_path = cur->xmlChildrenNode;
-			conf->monitor_paths = malloc(xmlChildElementCount(cur) * sizeof(char *));
+			conf->monitor_count = xmlChildElementCount(cur);
+			conf->monitor_paths = malloc(conf->monitor_count * sizeof(char *));
 			int k;
 			while(cur_path != NULL) {
 				tmp = xmlNodeGetContent(cur_path);
@@ -641,18 +638,89 @@ int main(int argc, char **argv)
 	}
 }
 
-w_status *change_conf(void *arg)
+w_status change_conf(struct watcher *self, int fanotify_fd)
 {
-	struct watcher *self = (struct watcher *)arg;
+	xmlDocPtr doc;
+	xmlNodePtr cur;
+	xmlNodePtr cur_path;
+	xmlChar *tmp;
 
-	if (strcmp(self->changed_key, "monitor_paths") == 0) {
-		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, self->changed_value) < 0) {
-			syslog(LOG_ERR, "Failed to mark %s: %m", self->changed_value);
-			exit(EXIT_FAILURE);
-		}
-	} else if (strcmp(self->changed_key, "working_directory")) {
-		
+	doc = xmlParseFile("/etc/watcher.conf");
+
+	if (doc == NULL ) {
+		fprintf(stderr,"Document not parsed successfully.\n");
+		return FAILURE;
 	}
+
+	cur = xmlDocGetRootElement(doc);
+
+	if (cur == NULL) {
+		fprintf(stderr,"empty document\n");
+		xmlFreeDoc(doc);
+		return FAILURE;
+	}
+
+	if (xmlStrcmp(cur->name, (const xmlChar *) "config")) {
+		fprintf(stderr,"document of the wrong type, root node != config\n");
+		xmlFreeDoc(doc);
+		return FAILURE;
+	}
+
+	cur = cur->xmlChildrenNode;
+	while (cur != NULL) {
+		if ((!xmlStrcmp(cur->name, (const xmlChar *) "working_directory")) && 
+		    (!xmlStrcmp("1", xmlGetProp(cur, "changed")))){
+
+			tmp = xmlNodeGetContent(cur->xmlChildrenNode);
+			self->conf->wd = malloc(strlen((const char *) tmp) + 1);
+			if (!self->conf->wd) {
+				fprintf(stderr, "Out of memory, program shutting down.\n");
+				return FAILURE;
+			}
+
+			strcpy(self->conf->wd, (const char *) tmp);
+			xmlFree(tmp);
+			chdir(self->conf->wd);
+		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths")) &&
+			   (!xmlStrcmp("1", xmlGetProp(cur, "changed")))) {
+
+			int k;
+			cur_path = cur->xmlChildrenNode;
+			for (k = 0; k < self->conf->monitor_count; k++) {
+				free(self->conf->monitor_paths[k]);
+			}
+			free(self->conf->monitor_paths);
+
+			self->conf->monitor_count = xmlChildElementCount(cur);
+			self->conf->monitor_paths = malloc(self->conf->monitor_count * sizeof(char *));
+
+			k = 0;
+			while (cur_path != NULL) {
+				tmp = xmlNodeGetContent(cur_path);
+				self->conf->monitor_paths[k] = malloc(strlen((const char *) tmp) + 1);
+				if (!self->conf->monitor_paths[k]) {
+					fprintf(stderr, "Out of memory, program shutting down.\n");
+					return FAILURE;
+				}
+
+				xmlFree(tmp);
+
+				if (!xmlStrcmp("1", xmlGetProp(cur_path, "changed"))) {
+					if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
+						syslog(LOG_ERR, "Failed to mark %s: %m", xmlNodeGetContent(cur_path));
+						return FAILURE;
+					}
+				}
+
+				k++;
+				cur_path = cur_path->next;
+			}
+		}
+
+		cur = cur->next;
+	}
+	return SUCCESS;
+
 }
 
 void *output(void *hash_map)
