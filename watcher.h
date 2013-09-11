@@ -41,5 +41,5 @@ struct watcher {
 int readlink_malloc(const char *p, char **r);
 void *change_conf(void *);
 void *output(void *);
-xmlDocPtr write_config(char *confname, char *keyname, char *value);
+xmlDocPtr write_config(char *confname, char *keyname, char *value, struct watcher *self);
 xmlDocPtr read_config(char *confname, struct w_config *conf);
