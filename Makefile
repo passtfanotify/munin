@@ -13,3 +13,11 @@ watcher: watcher.c watcher.h
 
 clean:
 	rm watcher
+
+install: watcher
+	cp ./watcher.conf /etc/watcher.conf
+	mkdir /var/lib/watcher
+
+deinstall:
+	rm /etc/watcher.conf
+	rm -r /var/lib/watcher
