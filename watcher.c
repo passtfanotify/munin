@@ -283,7 +283,6 @@ w_status w_start(struct watcher *self)
                                 } else {
                                         struct item *entry;
 
-					/* TODO: FREE */
                                         entry = (struct item *) calloc(1, sizeof(struct item));
                                         if (!entry) {
 						syslog(LOG_ERR,
@@ -293,7 +292,6 @@ w_status w_start(struct watcher *self)
                                                 goto finish;
                                         }
 
-					/* TODO: FREE */
                                         entry->path = malloc(strlen(p) + 1);
                                         if (!entry->path) {
                                                 free(entry);
@@ -515,55 +513,87 @@ int main(int argc, char **argv)
 {
 	struct watcher *self;
 	w_status res;
+	FILE *sfile;
+	time_t time;
+	char *tmp;
+	size_t readsize;
 
-	self = malloc(sizeof(struct watcher));
-
-	if(!self) {
-		fprintf(stderr, "Out of memory. Aborting.\n");
-		exit(EXIT_FAILURE);
-	}
-
-        self->files = g_hash_table_new(g_str_hash, g_str_equal);
-        if (!self->files) {
-                fprintf(stderr,"Failed to allocate set: %m\n");
-		free(self);
-		exit(EXIT_FAILURE);
+	sfile = fopen("/etc/watcher.start", r);
+	if (!sfile) {
+                perror("fopen");
+                exit(EXIT_FAILURE);
         }
 
-        self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
-        if (!self->old_files) {
-                fprintf(stderr, "Failed to allocate set: %m\n");
-		g_hash_table_destroy(self->files);
-		free(self);
-		exit(EXIT_FAILURE);
-        }
+	readsize = fread(tmp, 1, 1, sfile);
 
-	res = w_init(self);
-	if (res == FAILURE) {
-		fprintf(stderr, "Initialization of daemon failed.\n");
-		g_hash_table_destroy(self->files);
-		g_hash_table_destroy(self->old_files);
-                free(self);
+	if (readsize != 1) {
+		fprintf(stderr, "Read of /etc/watcher.start failed");
 		exit(EXIT_FAILURE);
 	}
 
-	res = w_start(self);
-	if (res == FAILURE) {
-		fprintf(stderr, "A runtime error occured. Please check logs.\n");
-		g_hash_table_destroy(self->files);
-                g_hash_table_destroy(self->old_files);
-                free(self);
-		exit(EXIT_FAILURE);
-	}
+	if (*tmp == '0') {
+		/* TODO: Use traditional backup because of incorrect shutdown*/
+		fclose(sfile);
+	} else {
 
-	res = w_shutdown(self);
-	if  (res == FAILURE) {
-		/*TODO: tell backup software to use traditional way, because of data loss*/
-		exit(EXIT_FAILURE);
-	}
+		rewind(sfile);
+		fprintf(sfile, "0");
+		fclose(sfile);
+		self = malloc(sizeof(struct watcher));
 
-	/*TODO: Mark sucessful shutdown in a file*/
-	exit(EXIT_SUCCESS);
+		if(!self) {
+			fprintf(stderr, "Out of memory. Aborting.\n");
+			exit(EXIT_FAILURE);
+		}
+
+        	self->files = g_hash_table_new(g_str_hash, g_str_equal);
+        	if (!self->files) {
+                	fprintf(stderr,"Failed to allocate set: %m\n");
+			free(self);
+			exit(EXIT_FAILURE);
+        	}
+
+        	self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
+        	if (!self->old_files) {
+                	fprintf(stderr, "Failed to allocate set: %m\n");
+			g_hash_table_destroy(self->files);
+			free(self);
+			exit(EXIT_FAILURE);
+        	}
+
+		res = w_init(self);
+		if (res == FAILURE) {
+			fprintf(stderr, "Initialization of daemon failed.\n");
+			g_hash_table_destroy(self->files);
+			g_hash_table_destroy(self->old_files);
+                	free(self);
+			exit(EXIT_FAILURE);
+		}
+
+		res = w_start(self);
+		if (res == FAILURE) {
+			fprintf(stderr, "A runtime error occured. Please check logs.\n");
+			g_hash_table_destroy(self->files);
+			g_hash_table_destroy(self->old_files);
+			free(self);
+			exit(EXIT_FAILURE);
+		}
+
+		res = w_shutdown(self);
+		if  (res == FAILURE) {
+			exit(EXIT_FAILURE);
+		}
+
+		sfile = fopen("/etc/watcher.start", w);
+		if (!sfile) {
+			perror("fopen");
+			exit(EXIT_FAILURE);
+		}
+
+		time = time(NULL);
+		fprintf(sfile, "%s", time);
+		fclose(sfile);
+		exit(EXIT_SUCCESS);
 }
 
 void *change_conf(void *arg)
