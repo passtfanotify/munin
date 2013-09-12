@@ -16,8 +16,19 @@ clean:
 
 install: watcher
 	cp ./watcher.conf /etc/watcher.conf
+	cp ./watcher.start /etc/watcher.start
 	mkdir /var/lib/watcher
 
 deinstall:
+	rm /etc/watcher.start
 	rm /etc/watcher.conf
 	rm -r /var/lib/watcher
+
+test: watcher
+	echo "0" > /etc/watcher.start
+	./watcher --daemon
+
+testend:
+	rm /etc/watcher.start
+	pkill watcher
+	rm /var/lib/watcher/save
