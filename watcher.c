@@ -725,6 +725,7 @@ int main(int argc, char **argv)
 			fclose(sfile);
 			exit(EXIT_SUCCESS);
 		}
+	}
 }
 
 w_status change_conf(struct watcher *self, int fanotify_fd)
