@@ -45,16 +45,19 @@ w_status w_init(struct watcher *self)
 	char *buff;
 	int s;
 	FILE *save;
+	FILE *sfile;
 	char input[PATH_MAX + 1];
 	char *p;
 
+
+	fprintf(stderr, "starting init\n");
 	errno  = 0;
 	conf = malloc(sizeof(struct w_config));
 	if (!conf) {
 		fprintf(stderr, "No memory left. Program will shut down now.\n");
 		return res;
 	}
-
+	fprintf(stderr, "starting reading config\n");
 	doc = read_config(confname, conf);
 	if (!doc) {
 		fprintf(stderr, "Please contact your local system administrator\n");
@@ -65,6 +68,7 @@ w_status w_init(struct watcher *self)
 		xmlFreeDoc(doc);
 	}
 
+	fprintf(stderr, "finished reading config\n");
 	bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
 	if (!bufsize) {
 		bufsize = DEFAULT_BUFFER_SIZE;
@@ -72,7 +76,7 @@ w_status w_init(struct watcher *self)
 
 	buff = malloc(bufsize);
 	if (buff != NULL) {
-		s = getpwnam_r("daemon", &pwd, buff, bufsize, &result);
+		s = getpwnam_r("root", &pwd, buff, bufsize, &result);
 
 		if (s == 0 && result) {
 			setuid(result->pw_uid);
@@ -83,6 +87,7 @@ w_status w_init(struct watcher *self)
 		free(conf);
 		return res;
 	}
+	fprintf(stderr, "fork 1.\n");
 
 	if((pid = fork()) < 0) {
 		return res;
@@ -99,7 +104,7 @@ w_status w_init(struct watcher *self)
 		free(conf);
 		return res;
 	}
-
+	fprintf(stderr, "fork 2.\n");
 	/* double-fork pattern to prevent zombie children */
 	if((pid = fork()) < 0) {
 		return res;
@@ -107,7 +112,17 @@ w_status w_init(struct watcher *self)
 		/* parent */
 		exit(EXIT_SUCCESS);
 	}
+	sfile = fopen("/etc/watcher.start", "w");
+	if (!sfile) {
+		perror("fopen");
+		exit(EXIT_FAILURE);
+	}
 
+	fprintf(sfile, "s%i\0", getpid());
+	fclose(sfile);
+
+	fprintf(stderr, "forked .\n");
+	fprintf(stderr, "%s\n", conf->wd);
 	if (-1 == chdir(conf->wd)) {
 		perror("could not change into working directory");
 		free(conf);
@@ -118,6 +133,11 @@ w_status w_init(struct watcher *self)
 	openlog("watcher", LOG_CONS | LOG_PID | LOG_PERROR, LOG_USER);
 
 	save = fopen("save", "r");
+	if(!save) {
+		fprintf(stderr, "no file avail \n");
+		res = SUCCESS;
+		return res;
+	}
 
 	while(fgets(input, PATH_MAX, save)){
 		struct item *entry;
@@ -129,6 +149,7 @@ w_status w_init(struct watcher *self)
 			free(p);
 			return res;
 		}
+		input[strlen(input)-1] = '\0';
 
 		p = malloc((strlen(input) + 1 )* sizeof(char));
 		if (!p) {
@@ -155,8 +176,9 @@ w_status w_init(struct watcher *self)
 
 	}
 
-	if (ferror(save))
+	if (ferror(save)) {
 		return res;
+	}
 
 	res = SUCCESS;
 	return res;
@@ -166,17 +188,38 @@ int endswith(char path[], const char *needle)
 {
 	char *pos;
 	size_t len;
+	size_t needle_len;
 
 	pos = strstr(path, needle);
 	len = strlen(path);
+	needle_len = strlen(needle);
 
 	if (pos) {
-		if (pos == &path[len - 10]) {
+		if (pos == &path[len - needle_len]) {
 			return 1;
 		}
 	}
 
 	return -1;
+
+}
+int startswith(char path[], const char *needle){
+	char *pos;
+	size_t len;
+	size_t needle_len;
+
+	pos = strstr(path, needle);
+	len = strlen(path);
+	needle_len = strlen(needle);
+
+	if (pos) {
+		if (pos == &path[0]) {
+			return 1;
+		}
+	}
+
+	return -1;
+
 }
 
 
@@ -214,6 +257,8 @@ w_status w_start(struct watcher *self)
         sigaddset(&mask, SIGTERM);
         sigaddset(&mask, SIGKILL);
 
+	sigprocmask(SIG_BLOCK, &mask, NULL);
+
         if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC)) < 0) {
                 syslog(LOG_ERR,"Failed to get signal fd: %m");
         	return res;
@@ -226,12 +271,28 @@ w_status w_start(struct watcher *self)
 	pollfd[1].fd = signal_fd;
 	pollfd[1].events = POLLIN;
 
+
+	syslog(LOG_ERR,"mark_path: / \n");
+	if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, "/") < 0) {
+		syslog(LOG_ERR, "Failed to mark /: %m");
+		return res;
+	}
+	/*
+	if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_IGNORED_MASK | FAN_MARK_IGNORED_SURV_MODIFY, FAN_MODIFY | FAN_ALL_EVENTS , 0, "/var/") < 0) {
+
+		fprintf(stderr, "%s, %d: Oo: %m\n", __FILE__, __LINE__);
+		return res;
+	}
+	*/
+
 	for(i=0; i< self->conf->monitor_count; i++){
-		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, (self->conf->monitor_paths[i])) < 0) {
+		syslog(LOG_ERR,"mark_path: %s\n" ,(self->conf->monitor_paths[i]));
+		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD, FAN_MODIFY, AT_FDCWD, self->conf->monitor_paths[i]) < 0) {
 			syslog(LOG_ERR, "Failed to mark %s: %m", self->conf->monitor_paths[i]);
         		return res;
 		}
 	}
+
 
 	while(1) {
 		union {
@@ -245,7 +306,7 @@ w_status w_start(struct watcher *self)
 
 		errno = 0;
 
-		if ((h = poll(pollfd, 2, -1))) {
+		if ((h = poll(pollfd, 2, -1)) == -1) {
 			if (errno == EINTR)
 				continue;
 
@@ -254,7 +315,7 @@ w_status w_start(struct watcher *self)
 		}
 
                 if (pollfd[1].revents) {
-                        syslog(LOG_NOTICE, "Got signal");
+			syslog(LOG_ERR, "got signal\n");
 			if(read(signal_fd, &sigs, sizeof(sigs)) < 0) {
 				if (errno == EINTR || errno == EAGAIN)
 					continue;
@@ -265,6 +326,7 @@ w_status w_start(struct watcher *self)
 				syslog(LOG_ERR, "Failed to read event: %m");
         			return res;
 			}
+			syslog(LOG_ERR, "read signal %d\n", sigs.ssi_signo);
 			if (!self->completed_out && sigs.ssi_signo == SIGUSR1) {
 				pthread_join(self->thread_output, thread_res);
 				if (*((int *)(*thread_res)) == EXIT_FAILURE) {
@@ -296,6 +358,7 @@ w_status w_start(struct watcher *self)
 				pthread_create(&self->thread_output, NULL, output, self);
 				continue;
 			} else {
+				syslog(LOG_ERR, "going out to finish\n");
 				res = SUCCESS;
 				return res;
 			}
@@ -323,12 +386,13 @@ w_status w_start(struct watcher *self)
 				continue;
 
                         snprintf(fn, sizeof(fn), "/proc/self/fd/%i", m->fd);
-			fn[sizeof(fn) - 1] = 0;
+			fn[sizeof(fn) - 1] = '\0';
 
                         if ((k = readlink_malloc(fn, &p)) >= 0) {
-                                if (endswith(p, " (deleted)") < 0 || g_hash_table_lookup(self->files, p)) {
+                                if (startswith(p, "/var/log/") == 1 || endswith(p, " (deleted)") == 1|| g_hash_table_lookup(self->files, p)) {
                                         free(p);
                                 } else {
+					syslog(LOG_ERR, "starting add: %s\n",p);
                                         struct item *entry;
 
                                         entry = (struct item *) calloc(1, sizeof(struct item));
@@ -351,6 +415,7 @@ w_status w_start(struct watcher *self)
 					strncpy(entry->path, p, strlen(p) + 1);
 
                                         g_hash_table_insert(self->files, p, entry);
+					syslog(LOG_ERR, "finished adding: %s\n",entry->path);
 				}
 			}
 		}
@@ -399,11 +464,13 @@ int readlink_malloc(const char *p, char **r)
 w_status w_shutdown(struct watcher *self)
 {
 	int k = 0;
-	FILE *savefile = fopen("save", "a+");
+	remove("save");
+	FILE *savefile = fopen("save", "w+");
 
 	GHashTableIter iter;
 	gpointer key, value;
 
+	syslog(LOG_ERR, "starting shutdown\n");
 	if (!savefile) {
 		return FAILURE;
 	}
@@ -426,6 +493,8 @@ w_status w_shutdown(struct watcher *self)
 	}
 	free(self->conf->monitor_paths);
 	free(self->conf);
+	syslog(LOG_ERR, "finished shutdown\n");
+
 
 	return SUCCESS;
 }
@@ -526,7 +595,7 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 		fprintf(stderr,"Document not parsed successfully.\n");
 		return NULL;
 	}
-
+	fprintf(stderr, "doc opened.\n");
 	cur = xmlDocGetRootElement(doc);
 
 	if (cur == NULL) {
@@ -535,6 +604,7 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 		return NULL;
 	}
 
+	fprintf(stderr, "got root.\n");
 	if (xmlStrcmp(cur->name, (const xmlChar *) "config")) {
 		fprintf(stderr,"document of the wrong type, root node != config\n");
 		xmlFreeDoc(doc);
@@ -542,34 +612,48 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 	}
 
 	cur = cur->xmlChildrenNode;
+	fprintf(stderr, "got child.\n");
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) "working_directory"))){
-			tmp = xmlNodeGetContent(cur->xmlChildrenNode);
+			cur_path = cur->xmlChildrenNode;
+			cur_path = cur_path->next;
+			fprintf(stderr, "start wd.\n");
+			tmp = xmlNodeGetContent(cur_path);
 			conf->wd = malloc(strlen((const char *) tmp) + 1);
 			if (!conf->wd) {
 				fprintf(stderr, "Out of memory, program shutting down.\n");
 				return NULL;
 			}
-
+			fprintf(stderr, "%s\n", tmp);
 			strcpy(conf->wd, (const char *) tmp);
 			xmlFree(tmp);
+			fprintf(stderr, "read wd.\n");
 		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths"))) {
+			fprintf(stderr, "start mp.\n");
 			cur_path = cur->xmlChildrenNode;
+			cur_path = cur_path->next;
+
 			conf->monitor_count = xmlChildElementCount(cur);
+			fprintf(stderr, "%d\n", conf->monitor_count);
 			conf->monitor_paths = malloc(conf->monitor_count * sizeof(char *));
-			int k;
+			int k = 0;
+			fprintf(stderr, "starting while.\n");
 			while(cur_path != NULL) {
+				fprintf(stderr, "loop count: %d.\n", k);
 				tmp = xmlNodeGetContent(cur_path);
 				conf->monitor_paths[k] = malloc(strlen((const char *) tmp) + 1);
 				if (!conf->monitor_paths[k]) {
 					fprintf(stderr, "Out of memory, program shutting down.\n");
 					return NULL;
 				}
+				strcpy(conf->monitor_paths[k], (const char *) tmp);
 
 				xmlFree(tmp);
 				k++;
 				cur_path = cur_path->next;
+				cur_path = cur_path->next;
 			}
+			fprintf(stderr, "read mp.\n");
 		}
 
 		cur = cur->next;
@@ -596,7 +680,7 @@ int main(int argc, char **argv)
 		printf("Usage: %s [--daemon] OR %s [--dir <working_dir>] [--addpath <watch_path>]  [--removepath <watched_path>]", argv[0], argv[0]);
 		exit(EXIT_SUCCESS);
 	}
-	
+
 	sfile = fopen("/etc/watcher.start", "r");
 	if (!sfile) {
 		perror("fopen");
@@ -654,7 +738,7 @@ int main(int argc, char **argv)
 			}
 		}
 
-	} else if (daemon == 1) { 
+	} else if (daemon == 1) {
 
 		if (started == 1) {
 			/* TODO: Use traditional backup because of incorrect shutdown*/
@@ -666,7 +750,7 @@ int main(int argc, char **argv)
 				exit(EXIT_FAILURE);
 			}
 
-			fprintf(sfile, "s%i\0", getpid());
+			fprintf(sfile, "s\0", getpid());
 			fclose(sfile);
 			self = malloc(sizeof(struct watcher));
 
@@ -675,6 +759,7 @@ int main(int argc, char **argv)
 				exit(EXIT_FAILURE);
 			}
 
+			self->completed_out = 1;
         		self->files = g_hash_table_new(g_str_hash, g_str_equal);
         		if (!self->files) {
                 		fprintf(stderr,"Failed to allocate set: %m\n");
@@ -720,7 +805,7 @@ int main(int argc, char **argv)
 			}
 
 			stime = time(NULL);
-			
+
 			fprintf(sfile, "%s", ctime(&stime));
 			fclose(sfile);
 			exit(EXIT_SUCCESS);
@@ -826,6 +911,7 @@ void *output(void *watcher)
 	gpointer key, value;
 	int res;
 	struct watcher *self = (struct watcher *)watcher;
+	self->completed_out = 0;
 
 	if (!savefile) {
 		res = EXIT_FAILURE;
