@@ -209,9 +209,9 @@ w_status w_start(struct watcher *self)
         	return res;
 	}
 	sigemptyset(&mask);
-        sigaddset(&mask, SIGINT);
+        sigaddset(&mask, SIGUSR1);
+        sigaddset(&mask, SIGUSR2);
         sigaddset(&mask, SIGTERM);
-        sigaddset(&mask, SIGQUIT);
         sigaddset(&mask, SIGKILL);
 
         if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC)) < 0) {
@@ -241,6 +241,7 @@ w_status w_start(struct watcher *self)
                 struct fanotify_event_metadata *m;
                 ssize_t n;
 		struct signalfd_siginfo sigs;
+		void **thread_res;
 
 		errno = 0;
 
@@ -264,22 +265,35 @@ w_status w_start(struct watcher *self)
 				syslog(LOG_ERR, "Failed to read event: %m");
         			return res;
 			}
-			if (!self->completed_out && sigs.ssi_signo == SIGQUIT) {
+			if (!self->completed_out && sigs.ssi_signo == SIGUSR1) {
+				pthread_join(self->thread_output, thread_res);
+				if (*((int *)(*thread_res)) == EXIT_FAILURE) {
+					syslog(LOG_ERR, "output failed. exiting");
+					return FAILURE;
+				}
+				change_conf(self, fanotify_fd);
 				continue;
 			} else if (!self->completed_out &&
 				   (sigs.ssi_signo == SIGKILL || sigs.ssi_signo == SIGTERM)) {
-				/* TODO: SIGKILL and SIGTERM while change of config was made*/
-				/* might be just waitpid */
-			} else if (sigs.ssi_signo == SIGQUIT){
+
+				pthread_join(self->thread_output, thread_res);
+				if (*((int *)(*thread_res)) == EXIT_FAILURE) {
+					syslog(LOG_ERR, "output failed. exiting");
+					return FAILURE;
+				} else {
+					w_shutdown(self);
+					return SUCCESS;
+				}
+			} else if (sigs.ssi_signo == SIGUSR1){
 				change_conf(self, fanotify_fd);
 				continue;
-			} else if (sigs.ssi_signo == SIGINT) {
+			} else if (sigs.ssi_signo == SIGUSR2) {
 				tmp = self->files;
 				self->files = self->old_files;
 				self->old_files = tmp;
 
-				pthread_create(&self->thread_output, NULL, output, self->old_files);
-				pthread_detach(self->thread_output);
+				self->completed_out = 0;
+				pthread_create(&self->thread_output, NULL, output, self);
 				continue;
 			} else {
 				res = SUCCESS;
@@ -428,7 +442,7 @@ w_status w_shutdown(struct watcher *self)
   @return: returns a pointer to the parsed xml config file
  */
 
-xmlDocPtr write_config(char *confname, char *keyname, char *value, struct watcher *self)
+xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid)
 {
 	xmlDocPtr doc;
 	xmlNodePtr cur;
@@ -473,6 +487,7 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, struct watche
 
 		cur = cur->next;
 	}
+	kill(pid, SIGUSR1);
 	return(doc);
 }
 
@@ -723,18 +738,22 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 
 }
 
-void *output(void *hash_map)
+void *output(void *watcher)
 {
-	FILE *savefile = fopen("save", "a+");
+	FILE *savefile = fopen("output", "a+");
 
 	GHashTableIter iter;
 	gpointer key, value;
+	int res;
+	struct watcher *self = (struct watcher *)watcher;
 
 	if (!savefile) {
-		exit(EXIT_FAILURE);
+		res = EXIT_FAILURE;
+		self->completed_out = 1;
+		pthread_exit((void *)&res);
 	}
 
-	g_hash_table_iter_init (&iter, (GHashTable *) hash_map);
+	g_hash_table_iter_init (&iter, self->old_files);
 	while (g_hash_table_iter_next (&iter, &key, &value)){
 		fprintf(savefile, "%s\n", (((struct item *)value)->path));
 		free(key);
@@ -744,6 +763,7 @@ void *output(void *hash_map)
 	}
 
 	fclose(savefile);
-
-	exit(EXIT_SUCCESS);
+	res = EXIT_SUCCESS;
+	self->completed_out = 1;
+	pthread_exit((void *)&res);
 }
