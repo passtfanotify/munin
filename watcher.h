@@ -40,6 +40,6 @@ struct watcher {
 int readlink_malloc(const char *p, char **r);
 w_status change_conf(struct watcher *self, int fanotify_fd);
 void *output(void *);
-xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid);
+xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int mode);
 xmlDocPtr read_config(char *confname, struct w_config *conf);
 w_status w_shutdown(struct watcher *self);

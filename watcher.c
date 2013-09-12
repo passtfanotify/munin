@@ -442,7 +442,7 @@ w_status w_shutdown(struct watcher *self)
   @return: returns a pointer to the parsed xml config file
  */
 
-xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid)
+xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int mode)
 {
 	xmlDocPtr doc;
 	xmlNodePtr cur;
@@ -474,11 +474,23 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid)
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) keyname))){
 			if(strcmp(keyname, "monitor_paths") == 0) {
-				name = malloc(strlen("value") + 3);
-				sprintf(name, "value%d", (int) xmlChildElementCount(cur)+1);
-				child = xmlNewChild(cur, NULL, name, value);
-				xmlNewProp(child, "changed", "1");
-				xmlSetProp(cur, "changed", "1");
+				if(mode == 1){
+					name = malloc(strlen("value") + 3);
+					sprintf(name, "value%d", (int) xmlChildElementCount(cur)+1);
+					child = xmlNewChild(cur, NULL, name, value);
+					xmlNewProp(child, "changed", "1");
+					xmlSetProp(cur, "changed", "1");
+				} else {
+					child = cur->xmlChildrenNode;
+					while (child != NULL) {
+						if (!xmlStrcmp(xmlNodeGetContent(child), (const xmlChar *) value)) {
+							break;
+						}
+						child = child->next;
+					}
+
+					xmlSetProp(cur, "changed", "2");
+				}
 			} else {
 				xmlNodeSetContent(cur->xmlChildrenNode, value);
 				xmlSetProp(cur, "changed", "1");
@@ -784,6 +796,11 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 
 				if (!xmlStrcmp("1", xmlGetProp(cur_path, "changed"))) {
 					if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
+						syslog(LOG_ERR, "Failed to mark %s: %m", xmlNodeGetContent(cur_path));
+						return FAILURE;
+					}
+				} else if (!xmlStrcmp("2", xmlGetProp(cur_path, "changed"))) {
+					if (fanotify_mark(fanotify_fd, FAN_MARK_REMOVE, FAN_MODIFY, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
 						syslog(LOG_ERR, "Failed to mark %s: %m", xmlNodeGetContent(cur_path));
 						return FAILURE;
 					}
