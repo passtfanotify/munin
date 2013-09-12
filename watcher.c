@@ -422,7 +422,7 @@ w_status w_shutdown(struct watcher *self)
   Note: Only valid config files can be parsed. If unsure, what keys can be
   set, you should look at the default config file.
 
-  @confname: name of the config file. Default: /etc/watcher.c
+  @confname: name of the config file. Default: /etc/watcher.conf
   @keyname: name of the config variable.
   @value: value, which shall be set for the config variable keyname
   @return: returns a pointer to the parsed xml config file
@@ -556,86 +556,148 @@ int main(int argc, char **argv)
 	w_status res;
 	FILE *sfile;
 	time_t stime;
-	char *tmp;
+	char tmp;
 	size_t readsize;
+	int daemon = 0;
+	int i;
+	char *confname = "/etc/watcher.conf";
+	char dpid[sizeof(pid_t)];
+	int started;
+	pid_t spid;
 
+	if (!strcmp(argv[1], "--help")) {
+		printf("Usage: %s [--daemon] OR %s [--dir <working_dir>] [--addpath <watch_path>]  [--removepath <watched_path>]", argv[0], argv[0]);
+		exit(EXIT_SUCCESS);
+	}
+	
 	sfile = fopen("/etc/watcher.start", "r");
 	if (!sfile) {
-                perror("fopen");
-                exit(EXIT_FAILURE);
-        }
-
-	readsize = fread(tmp, 1, 1, sfile);
-
-	if (readsize != 1) {
-		fprintf(stderr, "Read of /etc/watcher.start failed");
+		perror("fopen");
 		exit(EXIT_FAILURE);
 	}
 
-	if (*tmp == '0') {
-		/* TODO: Use traditional backup because of incorrect shutdown*/
+	readsize = fread(&tmp, 1, 1, sfile);
+
+	if (readsize != 1) {
+		fprintf(stderr, "Read of /etc/watcher.start failed");
 		fclose(sfile);
-	} else {
-
-		rewind(sfile);
-		fprintf(sfile, "0");
-		fclose(sfile);
-		self = malloc(sizeof(struct watcher));
-
-		if(!self) {
-			fprintf(stderr, "Out of memory. Aborting.\n");
-			exit(EXIT_FAILURE);
-		}
-
-        	self->files = g_hash_table_new(g_str_hash, g_str_equal);
-        	if (!self->files) {
-                	fprintf(stderr,"Failed to allocate set: %m\n");
-			free(self);
-			exit(EXIT_FAILURE);
-        	}
-
-        	self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
-        	if (!self->old_files) {
-                	fprintf(stderr, "Failed to allocate set: %m\n");
-			g_hash_table_destroy(self->files);
-			free(self);
-			exit(EXIT_FAILURE);
-        	}
-
-		res = w_init(self);
-		if (res == FAILURE) {
-			fprintf(stderr, "Initialization of daemon failed.\n");
-			g_hash_table_destroy(self->files);
-			g_hash_table_destroy(self->old_files);
-                	free(self);
-			exit(EXIT_FAILURE);
-		}
-
-		res = w_start(self);
-		if (res == FAILURE) {
-			fprintf(stderr, "A runtime error occured. Please check logs.\n");
-			g_hash_table_destroy(self->files);
-			g_hash_table_destroy(self->old_files);
-			free(self);
-			exit(EXIT_FAILURE);
-		}
-
-		res = w_shutdown(self);
-		if  (res == FAILURE) {
-			exit(EXIT_FAILURE);
-		}
-
-		sfile = fopen("/etc/watcher.start", "w");
-		if (!sfile) {
-			perror("fopen");
-			exit(EXIT_FAILURE);
-		}
-
-		stime = time(NULL);
-		fprintf(sfile, "%s", ctime(&stime));
-		fclose(sfile);
-		exit(EXIT_SUCCESS);
+		exit(EXIT_FAILURE);
 	}
+
+	if (tmp == 's') {
+		started == 1;
+		fread(dpid, sizeof(pid_t), 1, sfile);
+	}
+
+	fclose(sfile);
+
+	if (!strcmp(argv[1], "--daemon")) {
+		daemon = 1;
+	}
+
+	spid = (pid_t) atoi(dpid);
+
+	if (started == 1 && daemon == 0) {
+
+		for (i = 1; i < argc; i++) {
+
+			if (!strcmp(argv[i], "--dir")) {
+				if (argv[++i]) {
+					write_config(confname, "working_directory", argv[i], spid, 0);
+					i++;
+				}
+				continue;
+			}
+
+			if (!strcmp(argv[i], "--addpath")) {
+				if (argv[++i]) {
+					write_config(confname, "monitor_paths", argv[i], spid, 1);
+					i++;
+				}
+				continue;
+
+			}
+
+			if (!strcmp(argv[i], "--removepath")) {
+				if (argv[++i]) {
+					write_config(confname, "monitor_paths", argv[i], spid, 0);
+					i++;
+				}
+				continue;
+			}
+		}
+
+	} else if (daemon == 1) { 
+
+		if (started == 1) {
+			/* TODO: Use traditional backup because of incorrect shutdown*/
+		} else {
+
+			sfile = fopen("/etc/watcher.start", "w");
+			if (!sfile) {
+				perror("fopen");
+				exit(EXIT_FAILURE);
+			}
+
+			fprintf(sfile, "s%i\0", getpid());
+			fclose(sfile);
+			self = malloc(sizeof(struct watcher));
+
+			if(!self) {
+				fprintf(stderr, "Out of memory. Aborting.\n");
+				exit(EXIT_FAILURE);
+			}
+
+        		self->files = g_hash_table_new(g_str_hash, g_str_equal);
+        		if (!self->files) {
+                		fprintf(stderr,"Failed to allocate set: %m\n");
+				free(self);
+				exit(EXIT_FAILURE);
+        		}
+
+        		self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
+        		if (!self->old_files) {
+                		fprintf(stderr, "Failed to allocate set: %m\n");
+				g_hash_table_destroy(self->files);
+				free(self);
+				exit(EXIT_FAILURE);
+        		}
+
+			res = w_init(self);
+			if (res == FAILURE) {
+				fprintf(stderr, "Initialization of daemon failed.\n");
+				g_hash_table_destroy(self->files);
+				g_hash_table_destroy(self->old_files);
+                		free(self);
+				exit(EXIT_FAILURE);
+			}
+
+			res = w_start(self);
+			if (res == FAILURE) {
+				fprintf(stderr, "A runtime error occured. Please check logs.\n");
+				g_hash_table_destroy(self->files);
+				g_hash_table_destroy(self->old_files);
+				free(self);
+				exit(EXIT_FAILURE);
+			}
+
+			res = w_shutdown(self);
+			if  (res == FAILURE) {
+				exit(EXIT_FAILURE);
+			}
+
+			sfile = fopen("/etc/watcher.start", "w");
+			if (!sfile) {
+				perror("fopen");
+				exit(EXIT_FAILURE);
+			}
+
+			stime = time(NULL);
+			
+			fprintf(sfile, "%s", ctime(&stime));
+			fclose(sfile);
+			exit(EXIT_SUCCESS);
+		}
 }
 
 w_status change_conf(struct watcher *self, int fanotify_fd)
