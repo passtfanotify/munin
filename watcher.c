@@ -806,7 +806,7 @@ int main(int argc, char **argv)
 
 			stime = time(NULL);
 
-			fprintf(sfile, "%s", ctime(&stime));
+			fprintf(sfile, "%i", (int) &stime);
 			fclose(sfile);
 			exit(EXIT_SUCCESS);
 		}
