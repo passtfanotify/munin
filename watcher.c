@@ -545,6 +545,7 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int 
 					child = xmlNewChild(cur, NULL, name, value);
 					xmlNewProp(child, "changed", "1");
 					xmlSetProp(cur, "changed", "1");
+					child->next = xmlNewText("\n  ");
 				} else {
 					child = cur->xmlChildrenNode;
 					child = child->next;
@@ -906,6 +907,7 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 					return FAILURE;
 				}
 
+				strcpy(self->conf->monitor_paths[k], tmp);
 				xmlFree(tmp);
 
 				if (!xmlStrcmp("1", xmlGetProp(cur_path, "changed"))) {
@@ -927,8 +929,17 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 					}
 					cur_delete = cur_path;
 					cur_path = cur_path->next;
-					if (cur_path != NULL)
+					syslog(LOG_ERR, "Oo it died after mark %m\n");
+					xmlUnlinkNode(cur_delete);
+					syslog(LOG_ERR, "Oo it died after unlink %m\n");
+					xmlFreeNode(cur_delete);
+					syslog(LOG_ERR, "Oo it died after free %m\n");
+
+					if (cur_path != NULL) {
+						cur_delete = cur_path;
 						cur_path = cur_path->next;
+
+					}
 
 					syslog(LOG_ERR, "Oo it died after mark %m\n");
 					xmlUnlinkNode(cur_delete);
