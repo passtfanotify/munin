@@ -375,7 +375,14 @@ w_status w_start(struct watcher *self)
 			fn[sizeof(fn) - 1] = '\0';
 
                         if ((k = readlink_malloc(fn, &p)) >= 0) {
-                                if (startswith(p, "/var/") == 1 || endswith(p, " (deleted)") == 1|| g_hash_table_lookup(self->files, p)) {
+				int z;
+				int ignore = 1;
+				for(z  = 0; z < self->conf->monitor_count; z++) {
+					if (startswith(p, self->conf->monitor_paths[z]) == 1) {
+						ignore = 0;
+					}
+				}
+                                if (ignore || endswith(p, " (deleted)") == 1|| g_hash_table_lookup(self->files, p)) {
                                         free(p);
                                 } else {
 					syslog(LOG_ERR, "starting add: %s\n",p);
