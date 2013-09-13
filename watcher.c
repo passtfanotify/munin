@@ -271,23 +271,9 @@ w_status w_start(struct watcher *self)
 	pollfd[1].fd = signal_fd;
 	pollfd[1].events = POLLIN;
 
-
-	syslog(LOG_ERR,"mark_path: / \n");
-	if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, "/") < 0) {
-		syslog(LOG_ERR, "Failed to mark /: %m");
-		return res;
-	}
-	/*
-	if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_IGNORED_MASK | FAN_MARK_IGNORED_SURV_MODIFY, FAN_MODIFY | FAN_ALL_EVENTS , 0, "/var/") < 0) {
-
-		fprintf(stderr, "%s, %d: Oo: %m\n", __FILE__, __LINE__);
-		return res;
-	}
-	*/
-
 	for(i=0; i< self->conf->monitor_count; i++){
 		syslog(LOG_ERR,"mark_path: %s\n" ,(self->conf->monitor_paths[i]));
-		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD, FAN_MODIFY, AT_FDCWD, self->conf->monitor_paths[i]) < 0) {
+		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, FAN_MODIFY | FAN_CLOSE_WRITE, AT_FDCWD, self->conf->monitor_paths[i]) < 0) {
 			syslog(LOG_ERR, "Failed to mark %s: %m", self->conf->monitor_paths[i]);
         		return res;
 		}
@@ -389,7 +375,7 @@ w_status w_start(struct watcher *self)
 			fn[sizeof(fn) - 1] = '\0';
 
                         if ((k = readlink_malloc(fn, &p)) >= 0) {
-                                if (startswith(p, "/var/log/") == 1 || endswith(p, " (deleted)") == 1|| g_hash_table_lookup(self->files, p)) {
+                                if (startswith(p, "/var/") == 1 || endswith(p, " (deleted)") == 1|| g_hash_table_lookup(self->files, p)) {
                                         free(p);
                                 } else {
 					syslog(LOG_ERR, "starting add: %s\n",p);
@@ -518,6 +504,7 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int 
 	xmlNodePtr child;
 	char *name;
 
+	fprintf(stderr, "changing config started\n");
 	doc = xmlParseFile(confname);
 
 	if (doc == NULL ) {
@@ -539,36 +526,52 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int 
 		return (NULL);
 	}
 
+	fprintf(stderr, "changing config while\n");
+
 	cur = cur->xmlChildrenNode;
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) keyname))){
 			if(strcmp(keyname, "monitor_paths") == 0) {
 				if(mode == 1){
-					name = malloc(strlen("value") + 3);
-					sprintf(name, "value%d", (int) xmlChildElementCount(cur)+1);
+					name = malloc(strlen("value") + 1);
+					sprintf(name, "value");
 					child = xmlNewChild(cur, NULL, name, value);
 					xmlNewProp(child, "changed", "1");
 					xmlSetProp(cur, "changed", "1");
 				} else {
 					child = cur->xmlChildrenNode;
+					child = child->next;
 					while (child != NULL) {
 						if (!xmlStrcmp(xmlNodeGetContent(child), (const xmlChar *) value)) {
 							break;
 						}
 						child = child->next;
+						child = child->next;
 					}
-
-					xmlSetProp(cur, "changed", "2");
+					xmlSetProp(cur, "changed", "1");
+					xmlSetProp(child, "changed", "2");
 				}
 			} else {
-				xmlNodeSetContent(cur->xmlChildrenNode, value);
+				fprintf(stderr, "changing wd started\n");
+				child = cur->xmlChildrenNode;
+				child = child->next;
+				xmlNodeSetContent(child, value);
 				xmlSetProp(cur, "changed", "1");
+				fprintf(stderr, "changing wd ended\n");
 			}
 		}
 
 		cur = cur->next;
 	}
+	remove("/etc/watcher.conf");
+	FILE *conffile = fopen("/etc/watcher.conf", "w+");
+	if (!conffile) {
+		fprintf(stderr,"error opening conffile to write: %m");
+	}
+	xmlDocDump(conffile, doc);
+	fprintf(stderr, "wrote config\n");
 	kill(pid, SIGUSR1);
+	fprintf(stderr, "signaled\n");
 	return(doc);
 }
 
@@ -631,15 +634,16 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths"))) {
 			fprintf(stderr, "start mp.\n");
 			cur_path = cur->xmlChildrenNode;
+			fprintf(stderr, "node name: %s\n", cur_path->name);
 			cur_path = cur_path->next;
-
+			fprintf(stderr, "node name: %s\n", cur_path->name);
 			conf->monitor_count = xmlChildElementCount(cur);
-			fprintf(stderr, "%d\n", conf->monitor_count);
 			conf->monitor_paths = malloc(conf->monitor_count * sizeof(char *));
 			int k = 0;
 			fprintf(stderr, "starting while.\n");
 			while(cur_path != NULL) {
 				fprintf(stderr, "loop count: %d.\n", k);
+				fprintf(stderr, "node name start: %s\n", cur_path->name);
 				tmp = xmlNodeGetContent(cur_path);
 				conf->monitor_paths[k] = malloc(strlen((const char *) tmp) + 1);
 				if (!conf->monitor_paths[k]) {
@@ -651,6 +655,11 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 				xmlFree(tmp);
 				k++;
 				cur_path = cur_path->next;
+
+				if (cur_path == NULL) {
+					break;
+				}
+				fprintf(stderr, "node name end: %s\n", cur_path->name);
 				cur_path = cur_path->next;
 			}
 			fprintf(stderr, "read mp.\n");
@@ -673,7 +682,7 @@ int main(int argc, char **argv)
 	int i;
 	char *confname = "/etc/watcher.conf";
 	char dpid[sizeof(pid_t)];
-	int started;
+	int started = 0;
 	pid_t spid;
 
 	if (!strcmp(argv[1], "--help")) {
@@ -696,7 +705,7 @@ int main(int argc, char **argv)
 	}
 
 	if (tmp == 's') {
-		started == 1;
+		started = 1;
 		fread(dpid, sizeof(pid_t), 1, sfile);
 	}
 
@@ -709,11 +718,12 @@ int main(int argc, char **argv)
 	spid = (pid_t) atoi(dpid);
 
 	if (started == 1 && daemon == 0) {
-
+		fprintf(stderr, "command change\n");
 		for (i = 1; i < argc; i++) {
 
 			if (!strcmp(argv[i], "--dir")) {
 				if (argv[++i]) {
+					fprintf(stderr, "calling write_config\n");
 					write_config(confname, "working_directory", argv[i], spid, 0);
 					i++;
 				}
@@ -806,7 +816,7 @@ int main(int argc, char **argv)
 
 			stime = time(NULL);
 
-			fprintf(sfile, "%i", (int) &stime);
+			fprintf(sfile, "%i", (int) stime);
 			fclose(sfile);
 			exit(EXIT_SUCCESS);
 		}
@@ -818,49 +828,60 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 	xmlDocPtr doc;
 	xmlNodePtr cur;
 	xmlNodePtr cur_path;
+	xmlNodePtr cur_delete;
 	xmlChar *tmp;
 
 	doc = xmlParseFile("/etc/watcher.conf");
 
 	if (doc == NULL ) {
-		fprintf(stderr,"Document not parsed successfully.\n");
+		syslog(LOG_ERR,"Document not parsed successfully.\n");
 		return FAILURE;
 	}
 
 	cur = xmlDocGetRootElement(doc);
 
 	if (cur == NULL) {
-		fprintf(stderr,"empty document\n");
+		syslog(LOG_ERR,"empty document\n");
 		xmlFreeDoc(doc);
 		return FAILURE;
 	}
 
 	if (xmlStrcmp(cur->name, (const xmlChar *) "config")) {
-		fprintf(stderr,"document of the wrong type, root node != config\n");
+		syslog(LOG_ERR,"document of the wrong type, root node != config\n");
 		xmlFreeDoc(doc);
 		return FAILURE;
 	}
+
+	syslog(LOG_ERR, "STARTING CHANGE IN DAEMON\n");
 
 	cur = cur->xmlChildrenNode;
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) "working_directory")) && 
 		    (!xmlStrcmp("1", xmlGetProp(cur, "changed")))){
 
-			tmp = xmlNodeGetContent(cur->xmlChildrenNode);
+			xmlSetProp(cur, "changed", "0");
+			syslog(LOG_ERR, "CHANGING wd\n");
+			cur_path = cur->xmlChildrenNode;
+			cur_path = cur_path->next;
+			tmp = xmlNodeGetContent(cur_path);
 			self->conf->wd = malloc(strlen((const char *) tmp) + 1);
 			if (!self->conf->wd) {
-				fprintf(stderr, "Out of memory, program shutting down.\n");
+				syslog(LOG_ERR, "Out of memory, program shutting down.\n");
 				return FAILURE;
 			}
 
 			strcpy(self->conf->wd, (const char *) tmp);
 			xmlFree(tmp);
+			syslog(LOG_ERR, "now CHANGEING wd\n");
 			chdir(self->conf->wd);
 		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths")) &&
 			   (!xmlStrcmp("1", xmlGetProp(cur, "changed")))) {
 
+			xmlSetProp(cur, "changed", "0");
+			syslog(LOG_ERR, "monitor_paths changed\n");
 			int k;
 			cur_path = cur->xmlChildrenNode;
+			cur_path = cur_path->next;
 			for (k = 0; k < self->conf->monitor_count; k++) {
 				free(self->conf->monitor_paths[k]);
 			}
@@ -874,31 +895,59 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 				tmp = xmlNodeGetContent(cur_path);
 				self->conf->monitor_paths[k] = malloc(strlen((const char *) tmp) + 1);
 				if (!self->conf->monitor_paths[k]) {
-					fprintf(stderr, "Out of memory, program shutting down.\n");
+					syslog(LOG_ERR, "Out of memory, program shutting down.\n");
 					return FAILURE;
 				}
 
 				xmlFree(tmp);
 
 				if (!xmlStrcmp("1", xmlGetProp(cur_path, "changed"))) {
-					if (fanotify_mark(fanotify_fd, FAN_MARK_ADD|FAN_MARK_MOUNT, FAN_MODIFY, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
+					xmlSetProp(cur_path, "changed", "0");
+					syslog(LOG_ERR, "monitor_paths toadd: child: %s\n", xmlNodeGetContent(cur_path));
+					if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, FAN_MODIFY | FAN_CLOSE_WRITE, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
 						syslog(LOG_ERR, "Failed to mark %s: %m", xmlNodeGetContent(cur_path));
 						return FAILURE;
 					}
+					cur_path = cur_path->next;
+					if (cur_path != NULL)
+						cur_path = cur_path->next;
+
 				} else if (!xmlStrcmp("2", xmlGetProp(cur_path, "changed"))) {
-					if (fanotify_mark(fanotify_fd, FAN_MARK_REMOVE, FAN_MODIFY, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
+					syslog(LOG_ERR, "Oo it died\n");
+					if (fanotify_mark(fanotify_fd, FAN_MARK_REMOVE | FAN_MARK_MOUNT , FAN_MODIFY | FAN_CLOSE_WRITE, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
 						syslog(LOG_ERR, "Failed to mark %s: %m", xmlNodeGetContent(cur_path));
 						return FAILURE;
 					}
+					cur_delete = cur_path;
+					cur_path = cur_path->next;
+					if (cur_path != NULL)
+						cur_path = cur_path->next;
+
+					syslog(LOG_ERR, "Oo it died after mark %m\n");
+					xmlUnlinkNode(cur_delete);
+					syslog(LOG_ERR, "Oo it died after unlink %m\n");
+					xmlFreeNode(cur_delete);
+					syslog(LOG_ERR, "Oo it died after free %m\n");
+				} else {
+					cur_path = cur_path->next;
+					if (cur_path != NULL)
+						cur_path = cur_path->next;
+
 				}
 
 				k++;
-				cur_path = cur_path->next;
 			}
 		}
 
 		cur = cur->next;
 	}
+	remove("/etc/watcher.conf");
+	FILE *conffile = fopen("/etc/watcher.conf", "w+");
+	if (!conffile) {
+		fprintf(stderr,"error opening conffile to write: %m");
+	}
+	xmlDocDump(conffile, doc);
+
 	return SUCCESS;
 
 }
