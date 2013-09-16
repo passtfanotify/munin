@@ -95,7 +95,7 @@ class Select:
 		"""
 		if not sel_func: sel_func = self.Select
 		self.rpath.setdata() # this may have changed since Select init
-		self.iter = self.Iterate_fast(self.rpath, sel_func)
+		self.iter = self.Iterate_notify(self.rpath, sel_func)
 		self.next = self.iter.next
 		self.__iter__ = lambda: self
 		return self
@@ -144,6 +144,18 @@ class Select:
 				delayed_rp_stack.append(rpath)
 				diryield_stack.append(diryield(rpath))
 
+	def Iterate_notify(self, rpath, sel_func):
+		"""Return iterater to yield changed files functions
+		retrieved from the watcher daemon
+
+		"""
+		for paths in self.get_dir_changes(rpath):
+			s = sel_func(paths)
+			if s == 1:
+				print paths
+				yield paths
+
+
 	def Iterate(self, rp, rec_func, sel_func):
 		"""Return iterator yielding rpaths in rpath
 
@@ -180,6 +192,21 @@ class Select:
 		dir_listing = robust.check_common_error(error_handler, dir_rp.listdir)
 		dir_listing.sort()
 		return dir_listing
+
+	def get_dir_changes(self, rpath):
+		""" Filters the list returned by the daemon to get only files
+		that are requested by the backup programm
+
+		"""
+		infile = open("/srv/scratch/he86gixy/test", "r")
+		for paths in infile:
+			if paths.startswith(rpath):
+				dir_list.append(paths)
+
+		infile.close()
+
+		return dir_list
+
 
 	def iterate_in_dir(self, rpath, rec_func, sel_func):
 		"""Iterate the rpaths in directory rpath."""
