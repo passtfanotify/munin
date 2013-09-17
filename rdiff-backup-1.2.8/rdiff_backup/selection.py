@@ -203,7 +203,7 @@ class Select:
 		for paths in infile:
 			if paths.startswith(rpath.path):
 				print paths
-				dir_list.append(paths)
+				dir_list.append(RPath(Globals.connection, paths))
 
 		infile.close()
 
