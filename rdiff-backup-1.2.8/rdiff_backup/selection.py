@@ -95,7 +95,8 @@ class Select:
 		"""
 		if not sel_func: sel_func = self.Select
 		self.rpath.setdata() # this may have changed since Select init
-		self.iter = self.Iterate_notify(self.rpath, sel_func)
+		if mode == 1: self.iter = self.Iterate_notify(self.rpath, sel_func)
+		elif mode == 0: self.iter = self.Iterate_fast(self.rpath, sel_func)
 		self.next = self.iter.next
 		self.__iter__ = lambda: self
 		return self

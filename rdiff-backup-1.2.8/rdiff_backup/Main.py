@@ -47,6 +47,7 @@ def parse_cmdlineoptions(arglist):
 	global remote_schema, remove_older_than_string
 	global user_mapping_filename, group_mapping_filename, \
 		   preserve_numerical_ids
+	global mode
 
 	def sel_fl(filename):
 		"""Helper function for including/excluding filelists below"""
@@ -91,7 +92,8 @@ def parse_cmdlineoptions(arglist):
 		commandline_error("Bad commandline options: " + str(e))
 
 	for opt, arg in optlist:
-		if opt == "-b" or opt == "--backup-mode": action = "backup"
+		if opt == "-b" or opt == "--backup-mode": action = "backup", mode = 0
+		elif opt == "--backup-notify" : action = "backup", mode = 1
 		elif opt == "--calculate-average": action = "calculate-average"
 		elif opt == "--carbonfile": Globals.set("carbonfile_active", 1)
 		elif opt == "--check-destination-dir": action = "check-destination-dir"
@@ -237,7 +239,7 @@ def final_set_action(rps):
 	if action: return
 	assert len(rps) == 2, rps
 	if restore_set_root(rps[0]): action = "restore"
-	else: action = "backup"
+	else: action = "backup", mode = 1
 
 def commandline_error(message):
 	Log.FatalError(message + "\nSee the rdiff-backup manual page for "
@@ -340,7 +342,8 @@ def Backup(rpin, rpout):
 	if prevtime:
 		Time.setprevtime(prevtime)
 		rpout.conn.Main.backup_touch_curmirror_local(rpin, rpout)
-		backup.Mirror_and_increment(rpin, rpout, incdir)
+		backup.Notify_and_increment(rpin, rpout, incdir);
+		#backup.Mirror_and_increment(rpin, rpout, incdir)
 		rpout.conn.Main.backup_remove_curmirror_local()
 	else:
 		backup.Mirror(rpin, rpout)
