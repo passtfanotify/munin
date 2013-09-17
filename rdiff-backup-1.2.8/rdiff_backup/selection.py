@@ -200,7 +200,8 @@ class Select:
 		"""
 		infile = open("/srv/scratch/he86gixy/test", "r")
 		for paths in infile:
-			if paths.startswith(rpath):
+			if paths.startswith(rpath.path):
+				print paths
 				dir_list.append(paths)
 
 		infile.close()
