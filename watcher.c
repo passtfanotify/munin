@@ -130,6 +130,15 @@ w_status w_init(struct watcher *self)
 	}
 	self->conf = conf;
 
+	remove("/etc/watcher.path");
+	FILE *wdpath = fopen("/etc/watcher.path", "w");
+	if (!wdpath) {
+		fprintf(stderr,"error opening conffile to write: %m");
+	}
+	fprintf(wdpath, "%s", self->conf->wd);
+	fclose(wdpath);
+
+
 	openlog("watcher", LOG_CONS | LOG_PID | LOG_PERROR, LOG_USER);
 
 	save = fopen("save", "r");
@@ -159,7 +168,7 @@ w_status w_init(struct watcher *self)
 			return res;
 		}
 
-		strncpy(p, input, strlen(input) + 1);
+		strcpy(p, input);
 
 		entry->path = malloc(strlen(p) + 1);
 		if (!entry->path) {
@@ -279,7 +288,6 @@ w_status w_start(struct watcher *self)
 		}
 	}
 
-
 	while(1) {
 		union {
                         struct fanotify_event_metadata metadata;
@@ -341,6 +349,7 @@ w_status w_start(struct watcher *self)
 				self->old_files = tmp;
 
 				self->completed_out = 0;
+				self->act_caller = sigs.ssi_pid;
 				pthread_create(&self->thread_output, NULL, output, self);
 				continue;
 			} else {
@@ -380,6 +389,7 @@ w_status w_start(struct watcher *self)
 				for(z  = 0; z < self->conf->monitor_count; z++) {
 					if (startswith(p, self->conf->monitor_paths[z]) == 1) {
 						ignore = 0;
+						break;
 					}
 				}
                                 if (ignore || endswith(p, " (deleted)") == 1|| g_hash_table_lookup(self->files, p)) {
@@ -405,12 +415,13 @@ w_status w_start(struct watcher *self)
 
         					return res;
                                         }
-					strncpy(entry->path, p, strlen(p) + 1);
+					strcpy(entry->path, p);
 
                                         g_hash_table_insert(self->files, p, entry);
 					syslog(LOG_ERR, "finished adding: %s\n",entry->path);
 				}
 			}
+			close(m->fd);
 		}
 
 	}
@@ -479,6 +490,8 @@ w_status w_shutdown(struct watcher *self)
 
 	fclose(savefile);
 
+	g_hash_table_destroy(self->files);
+	g_hash_table_destroy(self->old_files);
 
 	free(self->conf->wd);
 	for(k=0; k < self->conf->monitor_count; k++){
@@ -882,6 +895,15 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 			xmlFree(tmp);
 			syslog(LOG_ERR, "now CHANGEING wd\n");
 			chdir(self->conf->wd);
+
+			remove("/etc/watcher.path");
+			FILE *wdpath = fopen("/etc/watcher.path", "w");
+			if (!wdpath) {
+				fprintf(stderr,"error opening conffile to write: %m");
+			}
+			fprintf(wdpath, "%s", self->conf->wd);
+			fclose(wdpath);
+
 		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths")) &&
 			   (!xmlStrcmp("1", xmlGetProp(cur, "changed")))) {
 
@@ -972,13 +994,14 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 
 void *output(void *watcher)
 {
-	FILE *savefile = fopen("output", "a+");
-
 	GHashTableIter iter;
 	gpointer key, value;
 	int res;
 	struct watcher *self = (struct watcher *)watcher;
 	self->completed_out = 0;
+
+	remove("output");
+	FILE *savefile = fopen("output", "a+");
 
 	if (!savefile) {
 		res = EXIT_FAILURE;
@@ -998,5 +1021,7 @@ void *output(void *watcher)
 	fclose(savefile);
 	res = EXIT_SUCCESS;
 	self->completed_out = 1;
+	kill(self->act_caller, SIGUSR1);
+	syslog(LOG_ERR, "send signal to rsync client: %d", self->act_caller);
 	pthread_exit((void *)&res);
 }
