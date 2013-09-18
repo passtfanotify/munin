@@ -281,7 +281,6 @@ w_status w_start(struct watcher *self)
 	pollfd[1].events = POLLIN;
 
 	for(i=0; i< self->conf->monitor_count; i++){
-		syslog(LOG_ERR,"mark_path: %s\n" ,(self->conf->monitor_paths[i]));
 		if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, FAN_MODIFY | FAN_CLOSE_WRITE, AT_FDCWD, self->conf->monitor_paths[i]) < 0) {
 			syslog(LOG_ERR, "Failed to mark %s: %m", self->conf->monitor_paths[i]);
         		return res;
@@ -291,7 +290,6 @@ w_status w_start(struct watcher *self)
 	while(1) {
 		union {
                         struct fanotify_event_metadata metadata;
-                        char buffer[4096];
                 } data;
                 struct fanotify_event_metadata *m;
                 ssize_t n;
@@ -309,7 +307,6 @@ w_status w_start(struct watcher *self)
 		}
 
                 if (pollfd[1].revents) {
-			syslog(LOG_ERR, "got signal\n");
 			if(read(signal_fd, &sigs, sizeof(sigs)) < 0) {
 				if (errno == EINTR || errno == EAGAIN)
 					continue;
@@ -317,10 +314,10 @@ w_status w_start(struct watcher *self)
 				if (errno == EACCES)
 					continue;
 
-				syslog(LOG_ERR, "Failed to read event: %m");
+				syslog(LOG_ERR, "Failed to read signal: %m");
         			return res;
 			}
-			syslog(LOG_ERR, "read signal %d\n", sigs.ssi_signo);
+			close(sigs.ssi_fd);
 			if (!self->completed_out && sigs.ssi_signo == SIGUSR1) {
 				pthread_join(self->thread_output, thread_res);
 				if (*((int *)(*thread_res)) == EXIT_FAILURE) {
@@ -353,7 +350,6 @@ w_status w_start(struct watcher *self)
 				pthread_create(&self->thread_output, NULL, output, self);
 				continue;
 			} else {
-				syslog(LOG_ERR, "going out to finish\n");
 				res = SUCCESS;
 				return res;
 			}
@@ -361,8 +357,9 @@ w_status w_start(struct watcher *self)
 
                 if ((n = read(fanotify_fd, &data, sizeof(data))) < 0) {
 
-                        if (errno == EINTR || errno == EAGAIN)
+                        if (errno == EINTR || errno == EAGAIN) {
                                 continue;
+			}
 
                         if (errno == EACCES)
                                 continue;
@@ -377,8 +374,10 @@ w_status w_start(struct watcher *self)
                         if (m->fd < 0)
 				continue;
 
-                        if (m->pid == getpid())
+                        if (m->pid == getpid()) {
+				close(m->fd);
 				continue;
+			}
 
                         snprintf(fn, sizeof(fn), "/proc/self/fd/%i", m->fd);
 			fn[sizeof(fn) - 1] = '\0';
@@ -395,7 +394,6 @@ w_status w_start(struct watcher *self)
                                 if (ignore || endswith(p, " (deleted)") == 1|| g_hash_table_lookup(self->files, p)) {
                                         free(p);
                                 } else {
-					syslog(LOG_ERR, "starting add: %s\n",p);
                                         struct item *entry;
 
                                         entry = (struct item *) calloc(1, sizeof(struct item));
@@ -418,7 +416,6 @@ w_status w_start(struct watcher *self)
 					strcpy(entry->path, p);
 
                                         g_hash_table_insert(self->files, p, entry);
-					syslog(LOG_ERR, "finished adding: %s\n",entry->path);
 				}
 			}
 			close(m->fd);
@@ -1001,7 +998,7 @@ void *output(void *watcher)
 	self->completed_out = 0;
 
 	remove("output");
-	FILE *savefile = fopen("output", "a+");
+	FILE *savefile = fopen("output", "w+");
 
 	if (!savefile) {
 		res = EXIT_FAILURE;
@@ -1022,6 +1019,5 @@ void *output(void *watcher)
 	res = EXIT_SUCCESS;
 	self->completed_out = 1;
 	kill(self->act_caller, SIGUSR1);
-	syslog(LOG_ERR, "send signal to rsync client: %d", self->act_caller);
 	pthread_exit((void *)&res);
 }
