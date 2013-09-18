@@ -18,7 +18,7 @@ void start_backup(int sig) {
 int main(int argc, char **argv)
 {
 	FILE *sfile;
-	char dpid[sizeof(pid_t)];
+	char dpid[10];
 	char tmp;
 	pid_t spid;
 	char *input;
@@ -67,17 +67,11 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	fread(dpid, sizeof(pid_t), 1, sfile);
+	fread(dpid, 10, 1, sfile);
 	fclose(sfile);
 
 	spid = (pid_t) atoi(dpid);
 	
-	/*retval = sigaddset(&mask, SIGUSR1);
-	if (retval != 0) {
-		fprintf(stderr, "sigaddset failed.\n");
-		exit(EXIT_FAILURE);
-	}*/
-
 	retval = kill(spid, SIGUSR2);
 	if (retval != 0) {
 		perror("kill");
@@ -106,11 +100,6 @@ int main(int argc, char **argv)
 	rargs[3] = input;
 	rargs[4] = output;
 
-	printf("%s\n", rargs[0]);
-	printf("%s\n", rargs[1]);
-	printf("%s\n", rargs[2]);
-	printf("%s\n", rargs[3]);
-	printf("%s\n", rargs[4]);
 	execv("/usr/bin/rsync", rargs);
 
 	perror("execv");
