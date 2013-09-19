@@ -23,12 +23,14 @@ install: watcher
 	cp ./watcher.start /etc/watcher.start
 	cp ./watcher.path /etc/watcher.path
 	mkdir /var/lib/watcher
+	mv watcher /usr/bin/
 
 deinstall:
 	rm /etc/watcher.start
 	rm /etc/watcher.conf
 	rm /etc/watcher.path
 	rm -r /var/lib/watcher
+	rm /usr/bin/watcher
 
 test: watcher
 	echo "0" > /etc/watcher.start
