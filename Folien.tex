@@ -1,0 +1,123 @@
+\documentclass{beamer}
+
+\usepackage[ngerman]{babel}
+
+
+\author{Bernd Bassimir \& Nico D\"orr}
+\title{Abschluss Praktikum}
+\date[20.9.2013]{20. September 2013}
+
+\usetheme{Copenhagen}
+\beamertemplatenavigationsymbolsempty
+\useoutertheme{default}
+
+\begin{document}
+\begin{frame}
+  \maketitle
+\end{frame}
+\begin{frame}{R\"uckblick: Unsere Ziele}
+  \begin{itemize}
+  \item
+    Unabh\"angiger Daemon auf fanotify-Basis zur \"Uberwachung von
+    Datei\"anderungen \checkmark
+  \item
+    \"Uberarbeitete Backup-Software mit Schnittstelle zum Daemon
+  \item
+    Funktionierendes Backupsystem, womit alle zu sichernden Dateien erfasst
+    werden \checkmark
+  \item
+    Beschleunigung des Backup-Vorgangs im Vergleich zur urspr\"unglichen Version
+    von rdiff-Backup \checkmark
+  \item
+    Gespr\"ache mit der Linux-Community und den rdiff-Backup-Entwicklern
+    bez\"uglich der Verwendung unserer L\"osung
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Fanotify Daemon}
+  Erfolge:
+  \begin{itemize}
+    \item
+      Daemon ist konfigurierbar
+    \item
+      Dateisystem ist mittels fanotify \"uberwacht
+    \item
+      Einschr\"ankung des Dateisystembaums mittels whitelist
+    \item
+      Output nebenl\"aufig, um keine Datei\"anderungen zu verlieren
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Fanotify Daemon}
+  Aufgetretene Probleme:
+  \begin{itemize}
+    \item
+      Starke Einschr\"ankung von fanotify:
+      \begin{itemize}
+      \item
+        Entweder nur ganze Mount-Points markierbar oder nur einzelne Ordner ohne
+        Unterordner
+      \item
+        Blacklisting nicht mittels fanotify m\"oglich
+      \item
+        L\"oschoperationen werden nicht registriert
+      \end{itemize}
+    \item
+      Schwierige Kommunikation mit den verschiedenen Usern
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{rdiff-Backup}
+  \begin{itemize}
+    \item
+      Code nicht gen\"ugend dokumentiert
+    \item
+      Keine Reaktion auf die Anfrage bez\"uglich der Erweiterung mittels des
+      Daemons
+    \item
+      Einf\"ugen der eigenen Schnittstelle stellte sich als schwierig heraus
+    \item
+      Versuch aus Zeitgr\"unden aufgegeben
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tests}
+\begin{itemize}
+  \item
+    /usr/src/ als Testverzeichnis benutzt
+  \item
+    ca. 140k Dateien im Verzeichnis vorhanden
+  \item
+    Getestet wurde mit touch. Dabei wurden 1\%/5\%/10\%/15\%/20\% angefasst.
+  \item
+    Wegen Zeiteinschr\"ankungen waren weitere Tests nicht mehr m\"oglich
+\end{itemize}
+\end{frame}
+
+\begin{frame}
+  Lustige plots: Under construction
+\end{frame}
+
+\begin{frame}
+  Lustige plots: Under construction
+\end{frame}
+
+\begin{frame}{Zuk\"unftige Anpassungen}
+  \begin{itemize}
+    \item
+      Verbesserung der Kommunikation Daemons mit den verschiedenen Usern
+    \item
+      Erweiterung des Daemons zur Benutzung von Blacklists
+    \item
+      Verbesserung von fanotify zum blacklisten und whitelisten
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \begin{center}
+  \huge{Danke f\"ur die Aufmerksamkeit!}\\
+  \huge{Noch Fragen?}
+\end{center}
+\end{frame}
+
+\end{document}
