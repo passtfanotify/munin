@@ -36,6 +36,7 @@ struct watcher {
 	volatile int completed_out;
 	pthread_t thread_output;
 	int act_caller;
+	int crash;
 };
 
 int readlink_malloc(const char *p, char **r);

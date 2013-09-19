@@ -22,11 +22,11 @@
 #include "watcher.h"
 
 /*
-  function, which initializes the daemon. It ensures, that there is only
-  one daemon running in the system. It then forks the daemon in the background.
-
-  @self:  pointer to the own data structure
-  @return: returns, if the starting of the daemon was successful.
+ * This function initializes the daemon. It ensures, that there is only
+ * one daemon running in the system. It then forks the daemon in the background.
+ *
+ * @self:  pointer to the own data structure
+ * @return: returns, if the starting of the daemon was successful.
  */
 w_status w_init(struct watcher *self)
 {
@@ -49,15 +49,13 @@ w_status w_init(struct watcher *self)
 	char input[PATH_MAX + 1];
 	char *p;
 
-
-	fprintf(stderr, "starting init\n");
 	errno  = 0;
 	conf = malloc(sizeof(struct w_config));
 	if (!conf) {
 		fprintf(stderr, "No memory left. Program will shut down now.\n");
 		return res;
 	}
-	fprintf(stderr, "starting reading config\n");
+
 	doc = read_config(confname, conf);
 	if (!doc) {
 		fprintf(stderr, "Please contact your local system administrator\n");
@@ -68,7 +66,6 @@ w_status w_init(struct watcher *self)
 		xmlFreeDoc(doc);
 	}
 
-	fprintf(stderr, "finished reading config\n");
 	bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
 	if (!bufsize) {
 		bufsize = DEFAULT_BUFFER_SIZE;
@@ -87,7 +84,6 @@ w_status w_init(struct watcher *self)
 		free(conf);
 		return res;
 	}
-	fprintf(stderr, "fork 1.\n");
 
 	if((pid = fork()) < 0) {
 		return res;
@@ -104,12 +100,9 @@ w_status w_init(struct watcher *self)
 		free(conf);
 		return res;
 	}
-	fprintf(stderr, "fork 2.\n");
-	/* double-fork pattern to prevent zombie children */
 	if((pid = fork()) < 0) {
 		return res;
 	} else if(pid != 0) {
-		/* parent */
 		exit(EXIT_SUCCESS);
 	}
 	sfile = fopen("/etc/watcher.start", "w");
@@ -121,8 +114,6 @@ w_status w_init(struct watcher *self)
 	fprintf(sfile, "s%i\0", getpid());
 	fclose(sfile);
 
-	fprintf(stderr, "forked .\n");
-	fprintf(stderr, "%s\n", conf->wd);
 	if (-1 == chdir(conf->wd)) {
 		perror("could not change into working directory");
 		free(conf);
@@ -143,7 +134,6 @@ w_status w_init(struct watcher *self)
 
 	save = fopen("save", "r");
 	if(!save) {
-		fprintf(stderr, "no file avail \n");
 		res = SUCCESS;
 		return res;
 	}
@@ -189,10 +179,15 @@ w_status w_init(struct watcher *self)
 		return res;
 	}
 
+	remove("save");
 	res = SUCCESS;
 	return res;
 }
 
+/*
+ * Helper function, that checks if an string ends with the
+ * string 'needle'
+ */
 int endswith(char path[], const char *needle)
 {
 	char *pos;
@@ -212,6 +207,11 @@ int endswith(char path[], const char *needle)
 	return -1;
 
 }
+
+/*
+ * Helper function, that checks if an string starts with the
+ * string 'needle'
+ */
 int startswith(char path[], const char *needle){
 	char *pos;
 	size_t len;
@@ -233,13 +233,13 @@ int startswith(char path[], const char *needle){
 
 
 /*
-  function, which implements the main loop of the daemon.
-  It initializes fanotify and the internal hashmap, which saves the names of
-  the changed files. It then registers the events in the filesystem, which
-  change files. These are stored in the hashmap.
-
-  @self: pointer to the own data structure
-  @return: returns, if there occured an error
+ * This function implements the main loop of the daemon.
+ * It initializes fanotify and the internal hashmap, which saves the names of
+ * the changed files. It then registers the events in the filesystem, which
+ * change files. These are stored in the hashmap.
+ *
+ * @self: pointer to the own data structure
+ * @return: returns, if there occured an error
  */
 w_status w_start(struct watcher *self)
 {
@@ -425,10 +425,9 @@ w_status w_start(struct watcher *self)
 }
 
 /*
-  Helper function, that will extract the filename out of the
-  given file descriptor. Function taken from systemd.
+ * Helper function, that will extract the filename out of the
+ * given file descriptor. Function taken from systemd.
  */
-
 int readlink_malloc(const char *p, char **r)
 {
         size_t l = 100;
@@ -454,24 +453,22 @@ int readlink_malloc(const char *p, char **r)
                 l *= 2;
         }
 }
+
 /*
-  function called, when daemon is shut down. This function will write the
-  current hashmap to the disc and cleans up all the used variables.
-
-  @self: pointer to the own data structure
-  @return: returns, if the shutdown is correctly executed.
+ * This function called, when daemon is shut down. This function will write the
+ * current hashmap to the disc and cleans up all the used variables.
+ *
+ * @self: pointer to the own data structure
+ * @return: return an status, if the config change was successful
  */
-
 w_status w_shutdown(struct watcher *self)
 {
 	int k = 0;
-	remove("save");
 	FILE *savefile = fopen("save", "w+");
 
 	GHashTableIter iter;
 	gpointer key, value;
 
-	syslog(LOG_ERR, "starting shutdown\n");
 	if (!savefile) {
 		return FAILURE;
 	}
@@ -496,24 +493,22 @@ w_status w_shutdown(struct watcher *self)
 	}
 	free(self->conf->monitor_paths);
 	free(self->conf);
-	syslog(LOG_ERR, "finished shutdown\n");
-
 
 	return SUCCESS;
 }
 
 /*
-  parses the config file and changes the value of the config variable.
-
-  Note: Only valid config files can be parsed. If unsure, what keys can be
-  set, you should look at the default config file.
-
-  @confname: name of the config file. Default: /etc/watcher.conf
-  @keyname: name of the config variable.
-  @value: value, which shall be set for the config variable keyname
-  @return: returns a pointer to the parsed xml config file
+ * This function parses the config file and changes the value of the
+ * config variable.
+ *
+ * Note: Only valid config files can be parsed. If unsure, what keys
+ *       can be set, you should look at the default config file.
+ *
+ * @confname: name of the config file. Default: /etc/watcher.conf
+ * @keyname: name of the config variable.
+ * @value: value, which shall be set for the config variable keyname
+ * @return: returns a pointer to the parsed xml config file
  */
-
 xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int mode)
 {
 	xmlDocPtr doc;
@@ -521,7 +516,6 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int 
 	xmlNodePtr child;
 	char *name;
 
-	fprintf(stderr, "changing config started\n");
 	doc = xmlParseFile(confname);
 
 	if (doc == NULL ) {
@@ -542,8 +536,6 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int 
 		xmlFreeDoc(doc);
 		return (NULL);
 	}
-
-	fprintf(stderr, "changing config while\n");
 
 	cur = cur->xmlChildrenNode;
 	while (cur != NULL) {
@@ -587,21 +579,21 @@ xmlDocPtr write_config(char *confname, char *keyname, char *value, int pid, int 
 		fprintf(stderr,"error opening conffile to write: %m");
 	}
 	xmlDocDump(conffile, doc);
-	fprintf(stderr, "wrote config\n");
+
 	kill(pid, SIGUSR1);
-	fprintf(stderr, "signaled\n");
+
 	return(doc);
 }
 
 /*
-  parses the config file and sets the config values for the daemon.
-
-  Note: Only valid config files can be parsed. If unsure, what keys can be
-  set, you should look at the default config file.
-
-  @confname: name of the config file. Default: /etc/watcher.conf
-  @conf: pointer to the config structure used by the daemon
-  @return: returns a pointer to the parsed xml config file
+ * parses the config file and sets the config values for the daemon.
+ *
+ * Note: Only valid config files can be parsed. If unsure, what keys can be
+ *       set, you should look at the default config file.
+ *
+ * @confname: name of the config file. Default: /etc/watcher.conf
+ * @conf: pointer to the config structure used by the daemon
+ * @return: returns a pointer to the parsed xml config file
  */
 xmlDocPtr read_config(char *confname, struct w_config *conf)
 {
@@ -616,7 +608,6 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 		fprintf(stderr,"Document not parsed successfully.\n");
 		return NULL;
 	}
-	fprintf(stderr, "doc opened.\n");
 	cur = xmlDocGetRootElement(doc);
 
 	if (cur == NULL) {
@@ -625,7 +616,6 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 		return NULL;
 	}
 
-	fprintf(stderr, "got root.\n");
 	if (xmlStrcmp(cur->name, (const xmlChar *) "config")) {
 		fprintf(stderr,"document of the wrong type, root node != config\n");
 		xmlFreeDoc(doc);
@@ -633,36 +623,33 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 	}
 
 	cur = cur->xmlChildrenNode;
-	fprintf(stderr, "got child.\n");
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) "working_directory"))){
 			cur_path = cur->xmlChildrenNode;
 			cur_path = cur_path->next;
-			fprintf(stderr, "start wd.\n");
+
 			tmp = xmlNodeGetContent(cur_path);
+
 			conf->wd = malloc(strlen((const char *) tmp) + 1);
 			if (!conf->wd) {
 				fprintf(stderr, "Out of memory, program shutting down.\n");
 				return NULL;
 			}
-			fprintf(stderr, "%s\n", tmp);
+
 			strcpy(conf->wd, (const char *) tmp);
 			xmlFree(tmp);
-			fprintf(stderr, "read wd.\n");
 		} else if ((!xmlStrcmp(cur->name, (const xmlChar *) "monitor_paths"))) {
-			fprintf(stderr, "start mp.\n");
 			cur_path = cur->xmlChildrenNode;
-			fprintf(stderr, "node name: %s\n", cur_path->name);
 			cur_path = cur_path->next;
-			fprintf(stderr, "node name: %s\n", cur_path->name);
+
 			conf->monitor_count = xmlChildElementCount(cur);
+
 			conf->monitor_paths = malloc(conf->monitor_count * sizeof(char *));
+
 			int k = 0;
-			fprintf(stderr, "starting while.\n");
 			while(cur_path != NULL) {
-				fprintf(stderr, "loop count: %d.\n", k);
-				fprintf(stderr, "node name start: %s\n", cur_path->name);
 				tmp = xmlNodeGetContent(cur_path);
+
 				conf->monitor_paths[k] = malloc(strlen((const char *) tmp) + 1);
 				if (!conf->monitor_paths[k]) {
 					fprintf(stderr, "Out of memory, program shutting down.\n");
@@ -671,23 +658,31 @@ xmlDocPtr read_config(char *confname, struct w_config *conf)
 				strcpy(conf->monitor_paths[k], (const char *) tmp);
 
 				xmlFree(tmp);
+
 				k++;
 				cur_path = cur_path->next;
 
 				if (cur_path == NULL) {
 					break;
 				}
-				fprintf(stderr, "node name end: %s\n", cur_path->name);
 				cur_path = cur_path->next;
 			}
-			fprintf(stderr, "read mp.\n");
 		}
 
 		cur = cur->next;
 	}
+
 	return(doc);
 }
 
+/*
+ * The main function handles the call of the daemon. It handles
+ * the input parameters and starts the corresponding action.
+ *
+ * Note: The use of the --daemon option can lead to undefined
+ *       behavior, when used in combination with the other
+ *       parameters
+ */
 int main(int argc, char **argv)
 {
 	struct watcher *self;
@@ -736,12 +731,10 @@ int main(int argc, char **argv)
 	spid = (pid_t) atoi(dpid);
 
 	if (started == 1 && daemon == 0) {
-		fprintf(stderr, "command change\n");
 		for (i = 1; i < argc; i++) {
 
 			if (!strcmp(argv[i], "--dir")) {
 				if (argv[++i]) {
-					fprintf(stderr, "calling write_config\n");
 					write_config(confname, "working_directory", argv[i], spid, 0);
 					i++;
 				}
@@ -767,80 +760,91 @@ int main(int argc, char **argv)
 		}
 
 	} else if (daemon == 1) {
+		sfile = fopen("/etc/watcher.start", "w");
+		if (!sfile) {
+			perror("fopen");
+			exit(EXIT_FAILURE);
+		}
+
+		fprintf(sfile, "s\0", getpid());
+		fclose(sfile);
+		self = malloc(sizeof(struct watcher));
+
+		if(!self) {
+			fprintf(stderr, "Out of memory. Aborting.\n");
+			exit(EXIT_FAILURE);
+		}
 
 		if (started == 1) {
-			/* TODO: Use traditional backup because of incorrect shutdown*/
+			syslog(LOG_WARNING, "Program crashed last time. ");
+			self->crash = 1;
 		} else {
-
-			sfile = fopen("/etc/watcher.start", "w");
-			if (!sfile) {
-				perror("fopen");
-				exit(EXIT_FAILURE);
-			}
-
-			fprintf(sfile, "s\0", getpid());
-			fclose(sfile);
-			self = malloc(sizeof(struct watcher));
-
-			if(!self) {
-				fprintf(stderr, "Out of memory. Aborting.\n");
-				exit(EXIT_FAILURE);
-			}
-
-			self->completed_out = 1;
-        		self->files = g_hash_table_new(g_str_hash, g_str_equal);
-        		if (!self->files) {
-                		fprintf(stderr,"Failed to allocate set: %m\n");
-				free(self);
-				exit(EXIT_FAILURE);
-        		}
-
-        		self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
-        		if (!self->old_files) {
-                		fprintf(stderr, "Failed to allocate set: %m\n");
-				g_hash_table_destroy(self->files);
-				free(self);
-				exit(EXIT_FAILURE);
-        		}
-
-			res = w_init(self);
-			if (res == FAILURE) {
-				fprintf(stderr, "Initialization of daemon failed.\n");
-				g_hash_table_destroy(self->files);
-				g_hash_table_destroy(self->old_files);
-                		free(self);
-				exit(EXIT_FAILURE);
-			}
-
-			res = w_start(self);
-			if (res == FAILURE) {
-				fprintf(stderr, "A runtime error occured. Please check logs.\n");
-				g_hash_table_destroy(self->files);
-				g_hash_table_destroy(self->old_files);
-				free(self);
-				exit(EXIT_FAILURE);
-			}
-
-			res = w_shutdown(self);
-			if  (res == FAILURE) {
-				exit(EXIT_FAILURE);
-			}
-
-			sfile = fopen("/etc/watcher.start", "w");
-			if (!sfile) {
-				perror("fopen");
-				exit(EXIT_FAILURE);
-			}
-
-			stime = time(NULL);
-
-			fprintf(sfile, "%i", (int) stime);
-			fclose(sfile);
-			exit(EXIT_SUCCESS);
+			self->crash = 0;
 		}
+
+		self->completed_out = 1;
+		self->files = g_hash_table_new(g_str_hash, g_str_equal);
+		if (!self->files) {
+			fprintf(stderr,"Failed to allocate set: %m\n");
+			free(self);
+			exit(EXIT_FAILURE);
+		}
+
+		self->old_files = g_hash_table_new(g_str_hash, g_str_equal);
+		if (!self->old_files) {
+			fprintf(stderr, "Failed to allocate set: %m\n");
+			g_hash_table_destroy(self->files);
+			free(self);
+			exit(EXIT_FAILURE);
+		}
+
+		res = w_init(self);
+		if (res == FAILURE) {
+			fprintf(stderr, "Initialization of daemon failed.\n");
+			g_hash_table_destroy(self->files);
+			g_hash_table_destroy(self->old_files);
+			free(self);
+			exit(EXIT_FAILURE);
+		}
+
+		res = w_start(self);
+		if (res == FAILURE) {
+			fprintf(stderr, "A runtime error occured. Please check logs.\n");
+			g_hash_table_destroy(self->files);
+			g_hash_table_destroy(self->old_files);
+			free(self);
+			exit(EXIT_FAILURE);
+		}
+
+		res = w_shutdown(self);
+		if  (res == FAILURE) {
+			exit(EXIT_FAILURE);
+		}
+
+		sfile = fopen("/etc/watcher.start", "w");
+		if (!sfile) {
+			perror("fopen");
+			exit(EXIT_FAILURE);
+		}
+
+		stime = time(NULL);
+
+		fprintf(sfile, "%i", (int) stime);
+		fclose(sfile);
+		exit(EXIT_SUCCESS);
 	}
 }
-
+/*
+ * This function changes the internal config structure,
+ * that saves the config options, while the daemon is
+ * running. The function is called, when SIGUSR1 is send
+ * from the main method to the running daemon.
+ *
+ * @self: pointer to the own data structure
+ * @fanotify_fd: file descriptor of fanotify
+ * @return: return an status, if the config change was
+ *          successful
+ */
 w_status change_conf(struct watcher *self, int fanotify_fd)
 {
 	xmlDocPtr doc;
@@ -850,14 +854,12 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 	xmlChar *tmp;
 
 	doc = xmlParseFile("/etc/watcher.conf");
-
 	if (doc == NULL ) {
 		syslog(LOG_ERR,"Document not parsed successfully.\n");
 		return FAILURE;
 	}
 
 	cur = xmlDocGetRootElement(doc);
-
 	if (cur == NULL) {
 		syslog(LOG_ERR,"empty document\n");
 		xmlFreeDoc(doc);
@@ -870,18 +872,18 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 		return FAILURE;
 	}
 
-	syslog(LOG_ERR, "STARTING CHANGE IN DAEMON\n");
-
 	cur = cur->xmlChildrenNode;
 	while (cur != NULL) {
 		if ((!xmlStrcmp(cur->name, (const xmlChar *) "working_directory")) && 
 		    (!xmlStrcmp("1", xmlGetProp(cur, "changed")))){
 
 			xmlSetProp(cur, "changed", "0");
-			syslog(LOG_ERR, "CHANGING wd\n");
+
 			cur_path = cur->xmlChildrenNode;
 			cur_path = cur_path->next;
+
 			tmp = xmlNodeGetContent(cur_path);
+
 			self->conf->wd = malloc(strlen((const char *) tmp) + 1);
 			if (!self->conf->wd) {
 				syslog(LOG_ERR, "Out of memory, program shutting down.\n");
@@ -890,7 +892,7 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 
 			strcpy(self->conf->wd, (const char *) tmp);
 			xmlFree(tmp);
-			syslog(LOG_ERR, "now CHANGEING wd\n");
+
 			chdir(self->conf->wd);
 
 			remove("/etc/watcher.path");
@@ -905,7 +907,7 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 			   (!xmlStrcmp("1", xmlGetProp(cur, "changed")))) {
 
 			xmlSetProp(cur, "changed", "0");
-			syslog(LOG_ERR, "monitor_paths changed\n");
+
 			int k;
 			cur_path = cur->xmlChildrenNode;
 			cur_path = cur_path->next;
@@ -931,7 +933,7 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 
 				if (!xmlStrcmp("1", xmlGetProp(cur_path, "changed"))) {
 					xmlSetProp(cur_path, "changed", "0");
-					syslog(LOG_ERR, "monitor_paths toadd: child: %s\n", xmlNodeGetContent(cur_path));
+
 					if (fanotify_mark(fanotify_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, FAN_MODIFY | FAN_CLOSE_WRITE, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
 						syslog(LOG_ERR, "Failed to mark %s: %m", xmlNodeGetContent(cur_path));
 						return FAILURE;
@@ -941,18 +943,16 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 						cur_path = cur_path->next;
 
 				} else if (!xmlStrcmp("2", xmlGetProp(cur_path, "changed"))) {
-					syslog(LOG_ERR, "Oo it died\n");
+
 					if (fanotify_mark(fanotify_fd, FAN_MARK_REMOVE | FAN_MARK_MOUNT , FAN_MODIFY | FAN_CLOSE_WRITE, AT_FDCWD, xmlNodeGetContent(cur_path)) < 0) {
 						syslog(LOG_ERR, "Failed to mark %s: %m", xmlNodeGetContent(cur_path));
 						return FAILURE;
 					}
+
 					cur_delete = cur_path;
 					cur_path = cur_path->next;
-					syslog(LOG_ERR, "Oo it died after mark %m\n");
 					xmlUnlinkNode(cur_delete);
-					syslog(LOG_ERR, "Oo it died after unlink %m\n");
 					xmlFreeNode(cur_delete);
-					syslog(LOG_ERR, "Oo it died after free %m\n");
 
 					if (cur_path != NULL) {
 						cur_delete = cur_path;
@@ -960,11 +960,9 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 
 					}
 
-					syslog(LOG_ERR, "Oo it died after mark %m\n");
 					xmlUnlinkNode(cur_delete);
-					syslog(LOG_ERR, "Oo it died after unlink %m\n");
 					xmlFreeNode(cur_delete);
-					syslog(LOG_ERR, "Oo it died after free %m\n");
+
 				} else {
 					cur_path = cur_path->next;
 					if (cur_path != NULL)
@@ -989,6 +987,13 @@ w_status change_conf(struct watcher *self, int fanotify_fd)
 
 }
 
+/*
+ * This function handles the output of our internal hash structure.
+ * It runs in an extra thread, that is started, when SIGUSR2 was
+ * send from the backup software
+ *
+ * @watcher: pointer to the own data structure
+ */
 void *output(void *watcher)
 {
 	GHashTableIter iter;
@@ -999,7 +1004,6 @@ void *output(void *watcher)
 
 	remove("output");
 	FILE *savefile = fopen("output", "w+");
-
 	if (!savefile) {
 		res = EXIT_FAILURE;
 		self->completed_out = 1;
@@ -1018,6 +1022,10 @@ void *output(void *watcher)
 	fclose(savefile);
 	res = EXIT_SUCCESS;
 	self->completed_out = 1;
-	kill(self->act_caller, SIGUSR1);
+	if (self->crash) {
+		kill(self->act_caller, SIGUSR2);
+	} else {
+		kill(self->act_caller, SIGUSR1);
+	}
 	pthread_exit((void *)&res);
 }
