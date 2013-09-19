@@ -1,0 +1,83 @@
+DESCRIPTION:
+
+	Watcher is a Linux daemon written in C using the fanotify API of the Linux kernel. It should be run at boot and will fork into the background. 
+	Watcher will survey the path(s) defined in the configuration file (/etc/watcher.conf) and notice every file modifications made to files in this path and its subdirectories. 
+	This will include modifications to the attributes as well as modifications of the file's data content. The daemon will store every modified file path in a hashtable, where every file
+	will only be stored once.
+	When shutting down (via SIGKILL or SIGTERM) the daemon will write the contents of the hashtable to a save file in the working directory (configured in the configuration file).
+	This save file will be read at the next start of the daemon an every path is put into the hashtable again.
+
+
+INSTALLING & Starting:
+
+	To install the daemon type
+
+				make install
+
+	with the included Makefile.
+	This will compile the daemon and copy the needed files to the used destinations. You should never change the location of these files, because it will prevent the daemon from working
+	correctly. The binary file will be moved to /usr/bin and should be added to the autostarting daemons of the system. The correct command to start the daemon is:
+
+				watcher --daemon
+
+	The daemon will then start and notice every modification to files in the specified file tree(s). The command should never be used, if the daemon is already running.
+
+
+CHANGE CONFIGURATION:
+
+	There are two possibilites to change the configuration of the daemon:
+		1) Change the configuration file directly: This will not affect the running daemon. Changes will be applied only after the next start of the daemon.
+
+		2) Start watcher with corresponding arguments: This will send a signal to the running daemon which will then apply changes to the configuration file, read in these changes and
+		continue with the new configuration values. To see the correct arguments to change the configuration use:
+
+				watcher --help
+	
+		This can not be used in the same call which is used when starting the daemon. If option "--daemon" is set, every other argument passed is ignored.
+
+	Currently the configuration contains the following changeable values:
+
+		working_directory: Contains the working directory that is used by the daemon. This directory contains the temporary files created by the daemon (output and save file).
+
+		watched_paths: Paths currently watched by the daemon. Paths can be added and removed with corresponding arguments. This is also possible with a runnig daemon, 
+				but modifications to added paths are of course only noticed since the adding of the path.
+
+
+REQUIREMENTS:
+
+	To use this daemon you need libxml-2.0 and glib-2.0.
+
+
+COMMUNICATION:
+
+	So this daemon is pretty useless without a software which takes the data from it and processes it. We built this daemon to use it with a backup software, but it is independent, so it
+	can also be used with other software.
+
+	To get data from the daemon the userspace software has to send SIGUSR2 to the daemon. The pid is currently stored in the file /etc/watcher.start. This file contains a string, which is
+	either a timestamp (which means the daemon is not running) or a 's' followed by the current pid. This means, that the daemon is either running (with the pid) or has been terminated
+	unsuspectetly (without SIGKILL or SIGTERM). If not running, the daemon has to be started first, before SIGUSR2 can be sent.
+
+	In response to SIGUSR2, the daemon will return one of two signals:
+
+		SIGUSR1: The daemon has stored the current content of the hashtable to the working directory. The path to the working directory is stored in /etc/watcher.path
+			 The file has the name "output".
+
+		SIGUSR2: The daemon was unsuspectetly terminated the last time.
+
+	The signals have to be handled by the corresponding software. E.g. when working with a backup software, a full backup without any use of the daemon should be made if SIGUSR2 is 
+	returned, because it most certainly has lost data.
+
+	This is just a easy, simple way of communication, which could certainly be improved.
+
+TROUBLESHOOTING:
+
+	This is just a little project which has many possible improvements, that can be made. This section lists a few cases which will cause data loss, trouble or unknown behavior.
+
+	When using "watcher --deamon" while the daemon is already running there will be a second instance of the daemon which will run as if the last time there was a unexpected shutdown.
+	This will cause unknown behavior, so you should only start the daemon if it is currently not running.
+
+	The daemon will not notice any file modifications made during boot, before the daemon is started. It can not be guaranteed, that the list of file modifications is complete, when
+	the first output after the boot process is requestet.
+
+	Currently all modifications of the watched paths are stored in one hashtable resulting in one outputfile. The processing software has to filter this filelist by itself, if only
+	a certain subset of the files is needed. This currently also counts for using blacklists. The ignoring of certain paths is a possible functionality which can be added in the future.

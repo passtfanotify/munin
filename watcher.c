@@ -470,6 +470,7 @@ w_status w_shutdown(struct watcher *self)
 	gpointer key, value;
 
 	if (!savefile) {
+		syslog(LOG_ERR, "Opening of savefile failed: %m");
 		return FAILURE;
 	}
 
@@ -694,7 +695,7 @@ int main(int argc, char **argv)
 	int daemon = 0;
 	int i;
 	char *confname = "/etc/watcher.conf";
-	char dpid[sizeof(pid_t)];
+	char dpid[11];
 	int started = 0;
 	pid_t spid;
 
@@ -719,8 +720,10 @@ int main(int argc, char **argv)
 
 	if (tmp == 's') {
 		started = 1;
-		fread(dpid, sizeof(pid_t), 1, sfile);
+		fread(dpid, 10, 1, sfile);
 	}
+
+	dpid[10] = '\0';
 
 	fclose(sfile);
 
@@ -760,14 +763,6 @@ int main(int argc, char **argv)
 		}
 
 	} else if (daemon == 1) {
-		sfile = fopen("/etc/watcher.start", "w");
-		if (!sfile) {
-			perror("fopen");
-			exit(EXIT_FAILURE);
-		}
-
-		fprintf(sfile, "s\0", getpid());
-		fclose(sfile);
 		self = malloc(sizeof(struct watcher));
 
 		if(!self) {

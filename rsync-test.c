@@ -18,7 +18,7 @@ void start_backup(int sig) {
 int main(int argc, char **argv)
 {
 	FILE *sfile;
-	char dpid[10];
+	char dpid[11];
 	char tmp;
 	pid_t spid;
 	char *input;
@@ -42,7 +42,7 @@ int main(int argc, char **argv)
                 fprintf(stderr, "sigemptyset failed.\n");
                 exit(EXIT_FAILURE);
         }	
-	//action.sa_flags = SA_RESTART;
+	
 	sigaction(SIGUSR1, &action, NULL);
 
 	input = argv[1];
@@ -68,6 +68,7 @@ int main(int argc, char **argv)
 	}
 
 	fread(dpid, 10, 1, sfile);
+	dpid[10] = '\0';
 	fclose(sfile);
 
 	spid = (pid_t) atoi(dpid);
@@ -95,7 +96,7 @@ int main(int argc, char **argv)
 	rargs[2] = malloc(sizeof(outfile) + 15);
 
 	rargs[0] = "rsync";
-	rargs[1] = "-brp";
+	rargs[1] = "-rptgoD";
 	sprintf(rargs[2], "--files-from=%s", outfile);
 	rargs[3] = input;
 	rargs[4] = output;
