@@ -48,7 +48,7 @@ int main(int argc, char **argv)
 	input = argv[1];
 	output = argv[2];
 
-	sfile = fopen("/etc/watcher.start", "r");
+	sfile = fopen("/etc/munin.start", "r");
 	if (!sfile) {
                 perror("fopen");
                 exit(EXIT_FAILURE);
@@ -56,7 +56,7 @@ int main(int argc, char **argv)
 
 	readsize = fread(&tmp, 1, 1, sfile);
 	if (readsize != 1) {
-                fprintf(stderr, "Read of /etc/watcher.start failed\n");
+                fprintf(stderr, "Read of /etc/munin.start failed\n");
                 fclose(sfile);
                 exit(EXIT_FAILURE);
         }
@@ -83,7 +83,7 @@ int main(int argc, char **argv)
 
 	}
 
-	sfile = fopen("/etc/watcher.path", "r");
+	sfile = fopen("/etc/munin.path", "r");
 	if (!sfile) {
                 perror("fopen");
                 exit(EXIT_FAILURE);
